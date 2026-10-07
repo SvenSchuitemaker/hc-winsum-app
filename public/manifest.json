@@ -1,0 +1,22 @@
+{
+  "name": "H.C. Winsum",
+  "short_name": "H.C. Winsum",
+  "description": "H.C. Winsum hockey training app",
+  "start_url": "/hc-winsum-app/",
+  "scope": "/hc-winsum-app/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0B5CAD",
+  "icons": [
+    {
+      "src": "/hc-winsum-app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/hc-winsum-app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
