@@ -1,11 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs } from "expo-router";
+import { useWindowDimensions } from "react-native";
 import { COLORS } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 
 export default function TabsLayout() {
     const { role } = useAuth();
+    const { width } = useWindowDimensions();
+
     const isAdmin = role === "super_admin";
+    const isCompact = width <= 390;
 
     return (
         <Tabs
@@ -16,6 +20,17 @@ export default function TabsLayout() {
                 tabBarStyle: {
                     backgroundColor: COLORS.surface,
                     borderTopColor: COLORS.border,
+                    height: isCompact ? 58 : undefined,
+                },
+                tabBarLabelStyle: {
+                    fontSize: isCompact ? 9 : 11,
+                    lineHeight: isCompact ? 11 : 13,
+                },
+                tabBarItemStyle: {
+                    paddingHorizontal: isCompact ? 0 : 2,
+                },
+                tabBarIconStyle: {
+                    marginTop: isCompact ? 2 : 0,
                 },
                 tabBarActiveTintColor: COLORS.primaryLight,
                 tabBarInactiveTintColor: COLORS.mutedText,
@@ -27,7 +42,11 @@ export default function TabsLayout() {
                     title: "Home",
                     tabBarLabel: "Home",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="home-outline" size={size} color={color} />
+                        <Ionicons
+                            name="home-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -38,7 +57,11 @@ export default function TabsLayout() {
                     title: "Planning",
                     tabBarLabel: "Planning",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="calendar-outline" size={size} color={color} />
+                        <Ionicons
+                            name="calendar-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -47,9 +70,13 @@ export default function TabsLayout() {
                 name="training-maken"
                 options={{
                     title: "Trainingen",
-                    tabBarLabel: "Trainingen",
+                    tabBarLabel: isCompact ? "Training" : "Trainingen",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="clipboard-outline" size={size} color={color} />
+                        <Ionicons
+                            name="clipboard-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -61,7 +88,11 @@ export default function TabsLayout() {
                     tabBarLabel: "Nieuwe",
                     href: isAdmin ? undefined : null,
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="add-outline" size={size} color={color} />
+                        <Ionicons
+                            name="add-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -70,9 +101,13 @@ export default function TabsLayout() {
                 name="favorieten"
                 options={{
                     title: "Favorieten",
-                    tabBarLabel: "Favorieten",
+                    tabBarLabel: isCompact ? "Favoriet" : "Favorieten",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="heart-outline" size={size} color={color} />
+                        <Ionicons
+                            name="heart-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -83,7 +118,11 @@ export default function TabsLayout() {
                     title: "Profile",
                     tabBarLabel: "Profile",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="person-outline" size={size} color={color} />
+                        <Ionicons
+                            name="person-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
@@ -92,8 +131,13 @@ export default function TabsLayout() {
                 name="teams"
                 options={{
                     title: "Teams",
+                    tabBarLabel: "Teams",
                     tabBarIcon: ({ color, size }) => (
-                        <Ionicons name="build-outline" size={size} color={color} />
+                        <Ionicons
+                            name="build-outline"
+                            size={isCompact ? Math.min(size, 20) : size}
+                            color={color}
+                        />
                     ),
                 }}
             />
