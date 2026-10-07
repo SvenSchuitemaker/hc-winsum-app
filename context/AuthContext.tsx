@@ -24,40 +24,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [role, setRole] = useState<UserRole>(null);
     const [loading, setLoading] = useState(true);
 
-    async function syncClubFromMetadata(currentUser: User | undefined) {
-        if (!supabase || !currentUser) return;
-
-        const rawClubId = currentUser.user_metadata?.club_id;
-        const clubId = typeof rawClubId === "number" ? rawClubId : Number(rawClubId);
-
-        if (!Number.isFinite(clubId) || clubId <= 0) return;
-
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select("club_id")
-            .eq("id", currentUser.id)
-            .maybeSingle();
-
-        if (profile && !profile.club_id) {
-            await supabase
-                .from("profiles")
-                .update({ club_id: clubId })
-                .eq("id", currentUser.id);
-        }
-    }
-
-    async function loadProfileRole(currentUser: User | undefined) {
-        if (!supabase || !currentUser) {
+    async function loadProfileRole(userId: string | undefined) {
+        if (!supabase || !userId) {
             setRole(null);
             return;
         }
 
-        await syncClubFromMetadata(currentUser);
-
         const { data, error } = await supabase
             .from("profiles")
             .select("role")
-            .eq("id", currentUser.id)
+            .eq("id", userId)
             .maybeSingle();
 
         if (error) {
@@ -84,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             setSession(nextSession);
             setUser(nextSession?.user ?? null);
-            await loadProfileRole(nextSession?.user);
+            await loadProfileRole(nextSession?.user?.id);
 
             if (mounted) {
                 setLoading(false);
