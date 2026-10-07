@@ -1,6 +1,14 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+    ActivityIndicator,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
+} from "react-native";
 import ExerciseCard from "../../components/ExerciseCard";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
@@ -15,6 +23,8 @@ type DbCategory = {
 
 export default function HomeScreen() {
     const router = useRouter();
+    const { width } = useWindowDimensions();
+    const isCompact = width <= 390;
 
     const [categories, setCategories] = useState<DbCategory[]>([]);
     const [loading, setLoading] = useState(true);
@@ -50,27 +60,41 @@ export default function HomeScreen() {
     }
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <View style={styles.hero}>
+        <ScrollView
+            style={styles.container}
+            contentContainerStyle={[
+                styles.content,
+                isCompact && styles.contentCompact,
+            ]}
+        >
+            <View style={[styles.hero, isCompact && styles.heroCompact]}>
                 <Image
                     source={require("../../assets/images/club-logo.png")}
-                    style={styles.logo}
+                    style={[styles.logo, isCompact && styles.logoCompact]}
                     resizeMode="contain"
                 />
 
-                <Text style={styles.clubName}>H.C. Winsum</Text>
-                <Text style={styles.subtitle}>Trainingen, oefeningen en teamontwikkeling</Text>
+                <Text style={[styles.clubName, isCompact && styles.clubNameCompact]}>
+                    H.C. Winsum
+                </Text>
+                <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
+                    Trainingen, oefeningen en teamontwikkeling
+                </Text>
 
-                <View style={styles.infoCard}>
-                    <Text style={styles.infoTitle}>Welkom in de clubapp</Text>
-                    <Text style={styles.infoText}>
+                <View style={[styles.infoCard, isCompact && styles.infoCardCompact]}>
+                    <Text style={[styles.infoTitle, isCompact && styles.infoTitleCompact]}>
+                        Welkom in de clubapp
+                    </Text>
+                    <Text style={[styles.infoText, isCompact && styles.infoTextCompact]}>
                         Kies een categorie en bekijk oefeningen voor trainingen, techniek en spelsituaties.
                     </Text>
                 </View>
             </View>
 
             <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Categorieën</Text>
+                <Text style={[styles.sectionTitle, isCompact && styles.sectionTitleCompact]}>
+                    Categorieën
+                </Text>
                 <Text style={styles.sectionText}>Selecteer een onderdeel om te beginnen</Text>
             </View>
 
@@ -103,6 +127,11 @@ const styles = StyleSheet.create({
         padding: SPACING.md,
         paddingBottom: SPACING.xxl,
     },
+    contentCompact: {
+        paddingHorizontal: 12,
+        paddingTop: 12,
+        paddingBottom: 28,
+    },
     hero: {
         backgroundColor: COLORS.surface,
         borderRadius: RADIUS.xl,
@@ -112,10 +141,20 @@ const styles = StyleSheet.create({
         borderColor: COLORS.border,
         alignItems: "center",
     },
+    heroCompact: {
+        borderRadius: RADIUS.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.lg,
+    },
     logo: {
         width: 120,
         height: 120,
         marginBottom: SPACING.sm,
+    },
+    logoCompact: {
+        width: 92,
+        height: 92,
+        marginBottom: 6,
     },
     clubName: {
         color: COLORS.text,
@@ -123,12 +162,20 @@ const styles = StyleSheet.create({
         fontWeight: "900",
         marginBottom: 4,
     },
+    clubNameCompact: {
+        fontSize: 26,
+    },
     subtitle: {
         color: COLORS.primaryLight,
         fontSize: 15,
         fontWeight: "700",
         marginBottom: SPACING.lg,
         textAlign: "center",
+    },
+    subtitleCompact: {
+        fontSize: 14,
+        marginBottom: SPACING.md,
+        paddingHorizontal: 4,
     },
     infoCard: {
         width: "100%",
@@ -138,16 +185,27 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.border,
     },
+    infoCardCompact: {
+        borderRadius: RADIUS.md,
+        padding: 12,
+    },
     infoTitle: {
         color: COLORS.text,
         fontSize: 18,
         fontWeight: "800",
         marginBottom: 6,
     },
+    infoTitleCompact: {
+        fontSize: 16,
+    },
     infoText: {
         color: COLORS.mutedText,
         fontSize: 15,
         lineHeight: 22,
+    },
+    infoTextCompact: {
+        fontSize: 14,
+        lineHeight: 20,
     },
     sectionHeader: {
         marginBottom: SPACING.md,
@@ -157,6 +215,9 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: "900",
         marginBottom: 4,
+    },
+    sectionTitleCompact: {
+        fontSize: 20,
     },
     sectionText: {
         color: COLORS.mutedText,
