@@ -47,12 +47,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         let mounted = true;
 
-        async function init() {
-            if (!supabase) {
-                if (mounted) setLoading(false);
-                return;
-            }
+        if (!supabase) {
+            setLoading(false);
 
+            return () => {
+                mounted = false;
+            };
+        }
+
+        async function init() {
             const {
                 data: { session },
             } = await supabase.auth.getSession();
@@ -62,16 +65,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setSession(session);
             setUser(session?.user ?? null);
             await loadProfileRole(session?.user?.id);
-            setLoading(false);
+
+            if (mounted) {
+                setLoading(false);
+            }
         }
 
         init();
 
-        const { data: listener } = supabase!.auth.onAuthStateChange(async (_event, session) => {
+        const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (!mounted) return;
+
             setSession(session);
             setUser(session?.user ?? null);
             await loadProfileRole(session?.user?.id);
-            setLoading(false);
+
+            if (mounted) {
+                setLoading(false);
+            }
         });
 
         return () => {
