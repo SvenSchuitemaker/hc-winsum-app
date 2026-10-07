@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "hockey-club-app",
+    "name": "H.C. Winsum",
     "slug": "hockey-club-app",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "hcwinsumapp",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
@@ -22,14 +23,21 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.svenschuitemaker.hockeyclubapp"
+      "package": "com.svenschuitemaker.hockeyclubapp",
+      "permissions": []
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "@react-native-community/datetimepicker"
     ],
+    "experiments": {
+      "baseUrl": "/hc-winsum-app"
+    },
     "extra": {
       "router": {
         "origin": false
@@ -37,6 +45,7 @@
       "eas": {
         "projectId": "aa83b17d-3c9d-48be-9cd8-4a576a181ee8"
       }
-    }
+    },
+    "owner": "svenschuitemaker"
   }
 }
