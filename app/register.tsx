@@ -153,7 +153,7 @@ export default function RegisterScreen() {
                 <Text style={styles.label}>Clubcode</Text>
                 <TextInput
                     style={styles.input}
-                    placeholder="K7P4-X9QM-2L8V"
+                    placeholder="CLUBCODE"
                     placeholderTextColor={COLORS.mutedText}
                     autoCapitalize="characters"
                     value={clubCode}
