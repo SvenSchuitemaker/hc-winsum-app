@@ -18,6 +18,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://shllbltitjogepjeyxdr.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_KyVUt2icqBTdyfcNaYDJcw_nBdTPAL5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
