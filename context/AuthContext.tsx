@@ -24,17 +24,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [role, setRole] = useState<UserRole>(null);
     const [loading, setLoading] = useState(true);
 
-    async function loadProfileRole(userId: string | undefined) {
-        if (!supabase || !userId) {
+    async function syncClubFromMetadata(currentUser: User | undefined) {
+        if (!supabase || !currentUser) return;
+
+        const rawClubId = currentUser.user_metadata?.club_id;
+        const clubId = typeof rawClubId === "number" ? rawClubId : Number(rawClubId);
+
+        if (!Number.isFinite(clubId) || clubId <= 0) return;
+
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("club_id")
+            .eq("id", currentUser.id)
+            .maybeSingle();
+
+        if (profile && !profile.club_id) {
+            await supabase
+                .from("profiles")
+                .update({ club_id: clubId })
+                .eq("id", currentUser.id);
+        }
+    }
+
+    async function loadProfileRole(currentUser: User | undefined) {
+        if (!supabase || !currentUser) {
             setRole(null);
             return;
         }
 
+        await syncClubFromMetadata(currentUser);
+
         const { data, error } = await supabase
             .from("profiles")
             .select("role")
-            .eq("id", userId)
-            .single();
+            .eq("id", currentUser.id)
+            .maybeSingle();
 
         if (error) {
             setRole(null);
@@ -55,34 +79,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             };
         }
 
-        async function init() {
-            const {
-                data: { session },
-            } = await supabase.auth.getSession();
-
+        async function applySession(nextSession: Session | null) {
             if (!mounted) return;
 
-            setSession(session);
-            setUser(session?.user ?? null);
-            await loadProfileRole(session?.user?.id);
+            setSession(nextSession);
+            setUser(nextSession?.user ?? null);
+            await loadProfileRole(nextSession?.user);
 
             if (mounted) {
                 setLoading(false);
             }
         }
 
+        async function init() {
+            const {
+                data: { session: initialSession },
+            } = await supabase.auth.getSession();
+
+            await applySession(initialSession);
+        }
+
         init();
 
-        const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            if (!mounted) return;
-
-            setSession(session);
-            setUser(session?.user ?? null);
-            await loadProfileRole(session?.user?.id);
-
-            if (mounted) {
-                setLoading(false);
-            }
+        const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+            await applySession(nextSession);
         });
 
         return () => {

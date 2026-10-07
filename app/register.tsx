@@ -19,48 +19,39 @@ type ClubRow = {
     club_code: string;
 };
 
-function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export default function RegisterScreen() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [clubCode, setClubCode] = useState("");
     const [loading, setLoading] = useState(false);
+    const [errorText, setErrorText] = useState("");
 
     async function attachClubToProfile(userId: string, clubId: number) {
-        if (!supabase) {
-            throw new Error("Supabase is niet geladen.");
-        }
+        if (!supabase) return;
 
-        let lastError: string | null = null;
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("club_id")
+            .eq("id", userId)
+            .maybeSingle();
 
-        for (let attempt = 0; attempt < 8; attempt++) {
-            const { error } = await supabase
-                .from("profiles")
-                .update({ club_id: clubId })
-                .eq("id", userId);
+        if (profile?.club_id) return;
 
-            if (!error) {
-                return;
-            }
-
-            lastError = error.message;
-            await sleep(400);
-        }
-
-        throw new Error(lastError || "Club kon niet aan profiel gekoppeld worden.");
+        await supabase
+            .from("profiles")
+            .update({ club_id: clubId })
+            .eq("id", userId);
     }
 
     async function handleRegister() {
         if (!email.trim() || !password.trim() || !clubCode.trim()) {
-            Alert.alert("Ontbrekende velden", "Vul e-mail, wachtwoord en clubcode in.");
+            setErrorText("Vul e-mail, wachtwoord en clubcode in.");
             return;
         }
 
         try {
             setLoading(true);
+            setErrorText("");
 
             if (!supabase) {
                 throw new Error("Supabase is niet geladen.");
@@ -83,6 +74,12 @@ export default function RegisterScreen() {
             const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                 email: email.trim(),
                 password: password.trim(),
+                options: {
+                    data: {
+                        club_id: club.id,
+                        club_name: club.name,
+                    },
+                },
             });
 
             if (signUpError) {
@@ -95,18 +92,20 @@ export default function RegisterScreen() {
                 throw new Error("Account aangemaakt, maar gebruiker kon niet worden opgehaald.");
             }
 
-            await attachClubToProfile(userId, club.id);
+            if (signUpData.session) {
+                await attachClubToProfile(userId, club.id);
+                router.replace("/");
+                return;
+            }
 
             Alert.alert(
-                "Account aangemaakt",
-                `Je account is gekoppeld aan ${club.name}.`
+                "Controleer je e-mail",
+                "Je account is aangemaakt. Bevestig eerst je e-mailadres en log daarna in."
             );
-
-            router.replace("/");
+            router.replace("/login?registered=1");
         } catch (error) {
-            Alert.alert(
-                "Registratie mislukt",
-                error instanceof Error ? error.message : "Er ging iets mis."
+            setErrorText(
+                error instanceof Error ? error.message : "Registratie mislukt."
             );
         } finally {
             setLoading(false);
@@ -152,6 +151,8 @@ export default function RegisterScreen() {
                     onChangeText={setClubCode}
                 />
 
+                {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
+
                 <Pressable
                     style={[styles.button, loading && styles.buttonDisabled]}
                     onPress={handleRegister}
@@ -164,7 +165,7 @@ export default function RegisterScreen() {
                     )}
                 </Pressable>
 
-                <Pressable style={styles.linkButton} onPress={() => router.push("/login")}>
+                <Pressable style={styles.linkButton} onPress={() => router.replace("/login")}>
                     <Text style={styles.linkText}>Ik heb al een account</Text>
                 </Pressable>
             </View>
@@ -241,5 +242,10 @@ const styles = StyleSheet.create({
         color: COLORS.accent,
         fontSize: 15,
         fontWeight: "700",
+    },
+    errorText: {
+        color: "#ff7b7b",
+        marginBottom: SPACING.md,
+        lineHeight: 20,
     },
 });
