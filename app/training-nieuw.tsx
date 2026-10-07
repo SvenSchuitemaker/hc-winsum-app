@@ -8,6 +8,8 @@ import { createElement, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    ImageBackground,
+    Modal,
     Platform,
     Pressable,
     ScrollView,
@@ -22,6 +24,13 @@ import { supabase } from "../lib/supabase";
 
 type ExerciseOption = {
     id: number;
+    title: string;
+    category_slug: string;
+    image_url: string | null;
+};
+
+type CategoryOption = {
+    slug: string;
     title: string;
 };
 
@@ -179,9 +188,12 @@ export default function TrainingNieuwScreen() {
     const [templates, setTemplates] = useState<TemplateOption[]>([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
+    const [categories, setCategories] = useState<CategoryOption[]>([]);
     const [allExercises, setAllExercises] = useState<ExerciseOption[]>([]);
     const [favoriteExercises, setFavoriteExercises] = useState<ExerciseOption[]>([]);
     const [exerciseSource, setExerciseSource] = useState<"all" | "favorites">("all");
+    const [exerciseSelectorBlockId, setExerciseSelectorBlockId] = useState<string | null>(null);
+    const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState<string>("all");
 
     const [blocks, setBlocks] = useState<BlockDraft[]>([]);
     const [loadingData, setLoadingData] = useState(true);
@@ -191,6 +203,16 @@ export default function TrainingNieuwScreen() {
     const exercises = useMemo(() => {
         return exerciseSource === "favorites" ? favoriteExercises : allExercises;
     }, [exerciseSource, favoriteExercises, allExercises]);
+
+    const selectorExercises = useMemo(() => {
+        if (exerciseCategoryFilter === "all") return exercises;
+        return exercises.filter((exercise) => exercise.category_slug === exerciseCategoryFilter);
+    }, [exerciseCategoryFilter, exercises]);
+
+    const selectedExerciseBlock = useMemo(() => {
+        if (!exerciseSelectorBlockId) return null;
+        return blocks.find((block) => block.localId === exerciseSelectorBlockId) ?? null;
+    }, [blocks, exerciseSelectorBlockId]);
 
     useEffect(() => {
         loadData();
@@ -204,11 +226,16 @@ export default function TrainingNieuwScreen() {
 
             const [
                 { data: teamsData, error: teamsError },
+                { data: categoryData, error: categoryError },
                 { data: exerciseData, error: exerciseError },
                 { data: templateData, error: templateError },
             ] = await Promise.all([
                 supabase.from("teams").select("id, name").order("name", { ascending: true }),
-                supabase.from("exercises").select("id, title").order("title", { ascending: true }),
+                supabase.from("categories").select("slug, title").order("id", { ascending: true }),
+                supabase
+                    .from("exercises")
+                    .select("id, title, category_slug, image_url")
+                    .order("title", { ascending: true }),
                 supabase
                     .from("training_templates")
                     .select("id, title, team_id")
@@ -216,14 +243,17 @@ export default function TrainingNieuwScreen() {
             ]);
 
             if (teamsError) throw teamsError;
+            if (categoryError) throw categoryError;
             if (exerciseError) throw exerciseError;
             if (templateError) throw templateError;
 
             const loadedTeams = (teamsData as TeamOption[]) || [];
+            const loadedCategories = (categoryData as CategoryOption[]) || [];
             const loadedExercises = (exerciseData as ExerciseOption[]) || [];
             const loadedTemplates = (templateData as TemplateOption[]) || [];
 
             setTeams(loadedTeams);
+            setCategories(loadedCategories);
             setTemplates(loadedTemplates);
             setAllExercises(loadedExercises);
 
@@ -240,7 +270,9 @@ export default function TrainingNieuwScreen() {
                     .select(`
             exercises (
               id,
-              title
+              title,
+              category_slug,
+              image_url
             )
           `)
                     .eq("user_id", user.id);
@@ -442,6 +474,23 @@ export default function TrainingNieuwScreen() {
                 block.localId === localId ? { ...block, [field]: value } : block
             )
         );
+    }
+
+    function openExerciseSelector(localId: string) {
+        setExerciseSelectorBlockId(localId);
+        setExerciseCategoryFilter("all");
+    }
+
+    function selectExercise(exercise: ExerciseOption) {
+        if (!exerciseSelectorBlockId) return;
+
+        updateBlock(exerciseSelectorBlockId, "exerciseId", String(exercise.id));
+        setExerciseSelectorBlockId(null);
+        setExerciseCategoryFilter("all");
+    }
+
+    function getSelectedExercise(exerciseId: string) {
+        return allExercises.find((exercise) => String(exercise.id) === exerciseId) ?? null;
     }
 
     function addBlock() {
@@ -738,23 +787,37 @@ export default function TrainingNieuwScreen() {
                             onChangeText={(value) => updateBlock(block.localId, "title", value)}
                         />
 
-                        <View style={styles.pickerWrap}>
-                            <Picker
-                                selectedValue={block.exerciseId}
-                                onValueChange={(value) => updateBlock(block.localId, "exerciseId", String(value))}
-                                dropdownIconColor="#111111"
-                                style={styles.picker}
-                            >
-                                {exercises.map((exercise) => (
-                                    <Picker.Item
-                                        key={exercise.id}
-                                        label={exercise.title}
-                                        value={String(exercise.id)}
-                                        color="#111111"
-                                    />
-                                ))}
-                            </Picker>
-                        </View>
+                        {(() => {
+                            const selectedExercise = getSelectedExercise(block.exerciseId);
+
+                            return (
+                                <Pressable
+                                    style={styles.exercisePickerButton}
+                                    onPress={() => openExerciseSelector(block.localId)}
+                                >
+                                    {selectedExercise?.image_url ? (
+                                        <ImageBackground
+                                            source={{ uri: selectedExercise.image_url }}
+                                            style={styles.exercisePickerThumb}
+                                            imageStyle={styles.exercisePickerThumbImage}
+                                        />
+                                    ) : (
+                                        <View style={styles.exercisePickerPlaceholder}>
+                                            <Ionicons name="image-outline" size={24} color={COLORS.mutedText} />
+                                        </View>
+                                    )}
+
+                                    <View style={styles.exercisePickerTextWrap}>
+                                        <Text style={styles.exercisePickerLabel}>Oefening</Text>
+                                        <Text style={styles.exercisePickerTitle} numberOfLines={2}>
+                                            {selectedExercise?.title || "Kies een oefening"}
+                                        </Text>
+                                    </View>
+
+                                    <Ionicons name="chevron-forward-outline" size={22} color={COLORS.primaryLight} />
+                                </Pressable>
+                            );
+                        })()}
 
                         <TextInput
                             style={styles.input}
@@ -775,6 +838,126 @@ export default function TrainingNieuwScreen() {
                         />
                     </View>
                 ))}
+
+                <Modal
+                    visible={!!exerciseSelectorBlockId}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => setExerciseSelectorBlockId(null)}
+                >
+                    <View style={styles.modalBackdrop}>
+                        <View style={styles.exerciseModal}>
+                            <View style={styles.modalHeader}>
+                                <View style={styles.modalHeaderText}>
+                                    <Text style={styles.modalTitle}>Kies een oefening</Text>
+                                    <Text style={styles.modalSubtitle}>
+                                        {selectedExerciseBlock?.title || "Trainingsonderdeel"}
+                                    </Text>
+                                </View>
+
+                                <Pressable
+                                    style={styles.modalCloseButton}
+                                    onPress={() => setExerciseSelectorBlockId(null)}
+                                >
+                                    <Ionicons name="close-outline" size={26} color={COLORS.text} />
+                                </Pressable>
+                            </View>
+
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.categoryTabs}
+                            >
+                                <Pressable
+                                    style={[
+                                        styles.categoryTab,
+                                        exerciseCategoryFilter === "all" && styles.categoryTabSelected,
+                                    ]}
+                                    onPress={() => setExerciseCategoryFilter("all")}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.categoryTabText,
+                                            exerciseCategoryFilter === "all" && styles.categoryTabTextSelected,
+                                        ]}
+                                    >
+                                        Alle
+                                    </Text>
+                                </Pressable>
+
+                                {categories.map((category) => {
+                                    const selected = exerciseCategoryFilter === category.slug;
+
+                                    return (
+                                        <Pressable
+                                            key={category.slug}
+                                            style={[
+                                                styles.categoryTab,
+                                                selected && styles.categoryTabSelected,
+                                            ]}
+                                            onPress={() => setExerciseCategoryFilter(category.slug)}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.categoryTabText,
+                                                    selected && styles.categoryTabTextSelected,
+                                                ]}
+                                                numberOfLines={1}
+                                            >
+                                                {category.title}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
+
+                            <ScrollView
+                                style={styles.exerciseModalScroll}
+                                contentContainerStyle={styles.exerciseGrid}
+                            >
+                                {selectorExercises.length === 0 ? (
+                                    <Text style={styles.modalEmptyText}>
+                                        Geen oefeningen gevonden in deze categorie.
+                                    </Text>
+                                ) : (
+                                    selectorExercises.map((exercise) => {
+                                        const selected = selectedExerciseBlock?.exerciseId === String(exercise.id);
+
+                                        return (
+                                            <Pressable
+                                                key={exercise.id}
+                                                style={[
+                                                    styles.exerciseChoiceCard,
+                                                    selected && styles.exerciseChoiceCardSelected,
+                                                ]}
+                                                onPress={() => selectExercise(exercise)}
+                                            >
+                                                <ImageBackground
+                                                    source={{
+                                                        uri:
+                                                            exercise.image_url ||
+                                                            "https://picsum.photos/600/400?random=99",
+                                                    }}
+                                                    style={styles.exerciseChoiceImage}
+                                                    imageStyle={styles.exerciseChoiceImageInner}
+                                                >
+                                                    {selected && (
+                                                        <View style={styles.selectedExerciseBadge}>
+                                                            <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                                                        </View>
+                                                    )}
+                                                </ImageBackground>
+                                                <Text style={styles.exerciseChoiceTitle} numberOfLines={2}>
+                                                    {exercise.title}
+                                                </Text>
+                                            </Pressable>
+                                        );
+                                    })
+                                )}
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
 
                 <Pressable style={styles.button} onPress={handleSave} disabled={saving}>
                     {saving ? (
@@ -915,6 +1098,179 @@ const styles = StyleSheet.create({
     picker: {
         color: "#111111",
         backgroundColor: "#F3F6FA",
+    },
+    exercisePickerButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        backgroundColor: COLORS.surface,
+        borderRadius: RADIUS.md,
+        padding: 10,
+        marginBottom: SPACING.md,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    exercisePickerThumb: {
+        width: 74,
+        height: 56,
+        overflow: "hidden",
+    },
+    exercisePickerThumbImage: {
+        borderRadius: 10,
+    },
+    exercisePickerPlaceholder: {
+        width: 74,
+        height: 56,
+        borderRadius: 10,
+        backgroundColor: COLORS.surfaceLight,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    exercisePickerTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    exercisePickerLabel: {
+        color: COLORS.primaryLight,
+        fontSize: 12,
+        fontWeight: "700",
+        marginBottom: 3,
+    },
+    exercisePickerTitle: {
+        color: COLORS.text,
+        fontSize: 15,
+        fontWeight: "800",
+        lineHeight: 20,
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.72)",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 14,
+    },
+    exerciseModal: {
+        width: "100%",
+        maxWidth: 980,
+        height: "88%",
+        backgroundColor: COLORS.background,
+        borderRadius: RADIUS.xl,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        overflow: "hidden",
+    },
+    modalHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: SPACING.md,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+        gap: 12,
+    },
+    modalHeaderText: {
+        flex: 1,
+    },
+    modalTitle: {
+        color: COLORS.text,
+        fontSize: 21,
+        fontWeight: "900",
+        marginBottom: 2,
+    },
+    modalSubtitle: {
+        color: COLORS.mutedText,
+        fontSize: 14,
+    },
+    modalCloseButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: COLORS.surface,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    categoryTabs: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 12,
+        gap: 8,
+    },
+    categoryTab: {
+        paddingHorizontal: 14,
+        paddingVertical: 9,
+        borderRadius: RADIUS.pill,
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    categoryTabSelected: {
+        backgroundColor: COLORS.primary,
+        borderColor: COLORS.primary,
+    },
+    categoryTabText: {
+        color: COLORS.text,
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    categoryTabTextSelected: {
+        color: "#FFFFFF",
+    },
+    exerciseModalScroll: {
+        flex: 1,
+    },
+    exerciseGrid: {
+        padding: SPACING.md,
+        paddingTop: 4,
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 12,
+    },
+    exerciseChoiceCard: {
+        width: "48%",
+        backgroundColor: COLORS.surface,
+        borderRadius: RADIUS.lg,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        overflow: "hidden",
+        minWidth: 0,
+    },
+    exerciseChoiceCardSelected: {
+        borderColor: COLORS.primaryLight,
+        borderWidth: 2,
+    },
+    exerciseChoiceImage: {
+        width: "100%",
+        aspectRatio: 4 / 3,
+        alignItems: "flex-end",
+        padding: 8,
+    },
+    exerciseChoiceImageInner: {
+        borderTopLeftRadius: RADIUS.lg,
+        borderTopRightRadius: RADIUS.lg,
+    },
+    selectedExerciseBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: COLORS.primary,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    exerciseChoiceTitle: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: "800",
+        lineHeight: 19,
+        padding: 10,
+    },
+    modalEmptyText: {
+        width: "100%",
+        color: COLORS.mutedText,
+        textAlign: "center",
+        fontSize: 15,
+        lineHeight: 22,
+        paddingVertical: SPACING.xl,
     },
     blockCard: {
         backgroundColor: COLORS.surfaceLight,
