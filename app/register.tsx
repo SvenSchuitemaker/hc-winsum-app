@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useState } from "react";
 import {
@@ -18,6 +19,8 @@ type ClubRow = {
     name: string;
     club_code: string;
 };
+
+const PENDING_CLUB_KEY = "pending_registration_club";
 
 export default function RegisterScreen() {
     const [email, setEmail] = useState("");
@@ -57,6 +60,7 @@ export default function RegisterScreen() {
                 throw new Error("Supabase is niet geladen.");
             }
 
+            const normalizedEmail = email.trim().toLowerCase();
             const normalizedClubCode = clubCode.trim().toUpperCase();
 
             const { data: clubData, error: clubError } = await supabase
@@ -72,14 +76,8 @@ export default function RegisterScreen() {
             const club = clubData as ClubRow;
 
             const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-                email: email.trim(),
+                email: normalizedEmail,
                 password: password.trim(),
-                options: {
-                    data: {
-                        club_id: club.id,
-                        club_name: club.name,
-                    },
-                },
             });
 
             if (signUpError) {
@@ -94,14 +92,25 @@ export default function RegisterScreen() {
 
             if (signUpData.session) {
                 await attachClubToProfile(userId, club.id);
+                await AsyncStorage.removeItem(PENDING_CLUB_KEY);
                 router.replace("/");
                 return;
             }
+
+            await AsyncStorage.setItem(
+                PENDING_CLUB_KEY,
+                JSON.stringify({
+                    email: normalizedEmail,
+                    clubId: club.id,
+                    clubName: club.name,
+                })
+            );
 
             Alert.alert(
                 "Controleer je e-mail",
                 "Je account is aangemaakt. Bevestig eerst je e-mailadres en log daarna in."
             );
+
             router.replace("/login?registered=1");
         } catch (error) {
             setErrorText(

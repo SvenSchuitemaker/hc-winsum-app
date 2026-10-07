@@ -1,8 +1,18 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { signIn } from "../lib/auth";
+import { supabase } from "../lib/supabase";
+
+const PENDING_CLUB_KEY = "pending_registration_club";
+
+type PendingClub = {
+    email: string;
+    clubId: number;
+    clubName: string;
+};
 
 export default function LoginScreen() {
     const params = useLocalSearchParams<{ registered?: string }>();
@@ -10,6 +20,46 @@ export default function LoginScreen() {
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [errorText, setErrorText] = useState("");
+
+    async function attachPendingClub(userId: string, loginEmail: string) {
+        if (!supabase) return;
+
+        const stored = await AsyncStorage.getItem(PENDING_CLUB_KEY);
+        if (!stored) return;
+
+        let pending: PendingClub;
+
+        try {
+            pending = JSON.parse(stored) as PendingClub;
+        } catch {
+            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
+            return;
+        }
+
+        if (pending.email.toLowerCase() !== loginEmail.toLowerCase()) {
+            return;
+        }
+
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("club_id")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profile?.club_id) {
+            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
+            return;
+        }
+
+        const { error } = await supabase
+            .from("profiles")
+            .update({ club_id: pending.clubId })
+            .eq("id", userId);
+
+        if (!error) {
+            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
+        }
+    }
 
     async function handleLogin() {
         if (!email.trim() || !password) {
@@ -20,7 +70,14 @@ export default function LoginScreen() {
         try {
             setLoading(true);
             setErrorText("");
-            await signIn(email.trim(), password);
+
+            const normalizedEmail = email.trim().toLowerCase();
+            const data = await signIn(normalizedEmail, password);
+
+            if (data.user?.id) {
+                await attachPendingClub(data.user.id, normalizedEmail);
+            }
+
             router.replace("/");
         } catch (error) {
             setErrorText(error instanceof Error ? error.message : "Inloggen mislukt.");
