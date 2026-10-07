@@ -4,7 +4,7 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -117,6 +117,49 @@ function formatDateForDatabase(date: Date | null) {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const year = date.getFullYear();
     return `${year}-${month}-${day}`;
+}
+
+function parseWebDate(value: string) {
+    if (!value) return null;
+
+    const [year, month, day] = value.split("-").map(Number);
+    if (!year || !month || !day) return null;
+
+    return new Date(year, month - 1, day);
+}
+
+function WebDatePicker({
+    value,
+    onChange,
+}: {
+    value: Date | null;
+    onChange: (date: Date | null) => void;
+}) {
+    return (
+        <View style={styles.webDateWrap}>
+            {createElement("input" as any, {
+                type: "date",
+                value: formatDateForDatabase(value) ?? "",
+                onChange: (event: any) => onChange(parseWebDate(event.target.value)),
+                "aria-label": "Kies een datum",
+                style: {
+                    width: "100%",
+                    minHeight: 48,
+                    border: "none",
+                    outline: "none",
+                    backgroundColor: "transparent",
+                    color: COLORS.text,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: 0,
+                    margin: 0,
+                    cursor: "pointer",
+                    colorScheme: "dark",
+                },
+            })}
+        </View>
+    );
 }
 
 export default function TrainingNieuwScreen() {
@@ -589,19 +632,25 @@ export default function TrainingNieuwScreen() {
                 </View>
 
                 <Text style={styles.label}>Datum</Text>
-                <Pressable style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-                    <Text style={styles.dateButtonText}>
-                        {trainingDate ? formatDateForDisplay(trainingDate) : "Kies een datum"}
-                    </Text>
-                </Pressable>
+                {Platform.OS === "web" ? (
+                    <WebDatePicker value={trainingDate} onChange={setTrainingDate} />
+                ) : (
+                    <>
+                        <Pressable style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
+                            <Text style={styles.dateButtonText}>
+                                {trainingDate ? formatDateForDisplay(trainingDate) : "Kies een datum"}
+                            </Text>
+                        </Pressable>
 
-                {showDatePicker && (
-                    <DateTimePicker
-                        value={trainingDate ?? new Date()}
-                        mode="date"
-                        display={Platform.OS === "ios" ? "spinner" : "default"}
-                        onChange={handleDateChange}
-                    />
+                        {showDatePicker && (
+                            <DateTimePicker
+                                value={trainingDate ?? new Date()}
+                                mode="date"
+                                display={Platform.OS === "ios" ? "spinner" : "default"}
+                                onChange={handleDateChange}
+                            />
+                        )}
+                    </>
                 )}
 
                 <Text style={styles.label}>Bron oefeningen</Text>
@@ -800,6 +849,15 @@ const styles = StyleSheet.create({
     textarea: {
         minHeight: 90,
         textAlignVertical: "top",
+    },
+    webDateWrap: {
+        backgroundColor: COLORS.surfaceLight,
+        borderRadius: RADIUS.md,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        marginBottom: SPACING.md,
+        borderWidth: 1,
+        borderColor: COLORS.border,
     },
     dateButton: {
         backgroundColor: COLORS.surfaceLight,
