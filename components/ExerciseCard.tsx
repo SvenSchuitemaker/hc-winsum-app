@@ -17,12 +17,23 @@ type Props = {
 export default function ExerciseCard({ title, image, onPress }: Props) {
     const { width } = useWindowDimensions();
     const isCompact = width <= 390;
+    const isDesktop = width >= 900;
 
     return (
-        <Pressable style={styles.card} onPress={onPress}>
+        <Pressable
+            style={[
+                styles.card,
+                isDesktop && styles.cardDesktop,
+            ]}
+            onPress={onPress}
+        >
             <ImageBackground
                 source={{ uri: image }}
-                style={[styles.image, isCompact && styles.imageCompact]}
+                style={[
+                    styles.image,
+                    isCompact && styles.imageCompact,
+                    isDesktop && styles.imageDesktop,
+                ]}
                 imageStyle={styles.imageInner}
             >
                 <View style={styles.overlay} />
@@ -53,12 +64,18 @@ const styles = StyleSheet.create({
         borderColor: COLORS.border,
         minWidth: 0,
     },
+    cardDesktop: {
+        width: "31.8%",
+    },
     image: {
         height: 170,
         justifyContent: "flex-end",
     },
     imageCompact: {
         height: 150,
+    },
+    imageDesktop: {
+        height: 220,
     },
     imageInner: {
         borderRadius: RADIUS.lg,

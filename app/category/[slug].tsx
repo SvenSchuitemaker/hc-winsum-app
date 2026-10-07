@@ -99,77 +99,79 @@ export default function CategoryScreen() {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <View style={styles.hero}>
-                <Text style={styles.title}>{category?.title || "Categorie"}</Text>
-                <Text style={styles.description}>
-                    {category?.description || "Bekijk oefeningen binnen deze categorie."}
-                </Text>
+            <View style={styles.pageContent}>
+                <View style={styles.hero}>
+                    <Text style={styles.title}>{category?.title || "Categorie"}</Text>
+                    <Text style={styles.description}>
+                        {category?.description || "Bekijk oefeningen binnen deze categorie."}
+                    </Text>
+                </View>
+
+                <View style={styles.filtersCard}>
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Zoek oefening..."
+                        placeholderTextColor={COLORS.mutedText}
+                        value={search}
+                        onChangeText={setSearch}
+                    />
+
+                    <Text style={styles.filterLabel}>Moeilijkheid</Text>
+                    <View style={styles.chipsRow}>
+                        {difficultyOptions.map((option) => {
+                            const selected = difficultyFilter === option;
+                            return (
+                                <Pressable
+                                    key={option}
+                                    style={[styles.chip, selected && styles.chipSelected]}
+                                    onPress={() => setDifficultyFilter(option)}
+                                >
+                                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                                        {option}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+
+                    <Text style={styles.filterLabel}>Doelgroep</Text>
+                    <View style={styles.chipsRow}>
+                        {audienceOptions.map((option) => {
+                            const selected = audienceFilter === option;
+                            return (
+                                <Pressable
+                                    key={option}
+                                    style={[styles.chip, selected && styles.chipSelected]}
+                                    onPress={() => setAudienceFilter(option)}
+                                >
+                                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                                        {option}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                {loading ? (
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                ) : errorText ? (
+                    <Text style={styles.errorText}>{errorText}</Text>
+                ) : filteredItems.length === 0 ? (
+                    <Text style={styles.emptyText}>Geen oefeningen gevonden met deze filters.</Text>
+                ) : (
+                    <View style={styles.grid}>
+                        {filteredItems.map((item) => (
+                            <ExerciseCard
+                                key={item.id}
+                                title={item.title}
+                                image={item.image_url || "https://picsum.photos/600/400?random=99"}
+                                onPress={() => router.push(`/exercise/${item.id}`)}
+                            />
+                        ))}
+                    </View>
+                )}
             </View>
-
-            <View style={styles.filtersCard}>
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Zoek oefening..."
-                    placeholderTextColor={COLORS.mutedText}
-                    value={search}
-                    onChangeText={setSearch}
-                />
-
-                <Text style={styles.filterLabel}>Moeilijkheid</Text>
-                <View style={styles.chipsRow}>
-                    {difficultyOptions.map((option) => {
-                        const selected = difficultyFilter === option;
-                        return (
-                            <Pressable
-                                key={option}
-                                style={[styles.chip, selected && styles.chipSelected]}
-                                onPress={() => setDifficultyFilter(option)}
-                            >
-                                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                                    {option}
-                                </Text>
-                            </Pressable>
-                        );
-                    })}
-                </View>
-
-                <Text style={styles.filterLabel}>Doelgroep</Text>
-                <View style={styles.chipsRow}>
-                    {audienceOptions.map((option) => {
-                        const selected = audienceFilter === option;
-                        return (
-                            <Pressable
-                                key={option}
-                                style={[styles.chip, selected && styles.chipSelected]}
-                                onPress={() => setAudienceFilter(option)}
-                            >
-                                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                                    {option}
-                                </Text>
-                            </Pressable>
-                        );
-                    })}
-                </View>
-            </View>
-
-            {loading ? (
-                <ActivityIndicator size="large" color={COLORS.primary} />
-            ) : errorText ? (
-                <Text style={styles.errorText}>{errorText}</Text>
-            ) : filteredItems.length === 0 ? (
-                <Text style={styles.emptyText}>Geen oefeningen gevonden met deze filters.</Text>
-            ) : (
-                <View style={styles.grid}>
-                    {filteredItems.map((item) => (
-                        <ExerciseCard
-                            key={item.id}
-                            title={item.title}
-                            image={item.image_url || "https://picsum.photos/600/400?random=99"}
-                            onPress={() => router.push(`/exercise/${item.id}`)}
-                        />
-                    ))}
-                </View>
-            )}
         </ScrollView>
     );
 }
@@ -182,6 +184,11 @@ const styles = StyleSheet.create({
     content: {
         padding: SPACING.md,
         paddingBottom: SPACING.xxl,
+    },
+    pageContent: {
+        width: "100%",
+        maxWidth: 1200,
+        alignSelf: "center",
     },
     hero: {
         backgroundColor: COLORS.surface,

@@ -67,53 +67,55 @@ export default function HomeScreen() {
                 isCompact && styles.contentCompact,
             ]}
         >
-            <View style={[styles.hero, isCompact && styles.heroCompact]}>
-                <Image
-                    source={require("../../assets/images/club-logo.png")}
-                    style={[styles.logo, isCompact && styles.logoCompact]}
-                    resizeMode="contain"
-                />
+            <View style={styles.pageContent}>
+                <View style={[styles.hero, isCompact && styles.heroCompact]}>
+                    <Image
+                        source={require("../../assets/images/club-logo.png")}
+                        style={[styles.logo, isCompact && styles.logoCompact]}
+                        resizeMode="contain"
+                    />
 
-                <Text style={[styles.clubName, isCompact && styles.clubNameCompact]}>
-                    H.C. Winsum
-                </Text>
-                <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
-                    Trainingen, oefeningen en teamontwikkeling
-                </Text>
-
-                <View style={[styles.infoCard, isCompact && styles.infoCardCompact]}>
-                    <Text style={[styles.infoTitle, isCompact && styles.infoTitleCompact]}>
-                        Welkom in de clubapp
+                    <Text style={[styles.clubName, isCompact && styles.clubNameCompact]}>
+                        H.C. Winsum
                     </Text>
-                    <Text style={[styles.infoText, isCompact && styles.infoTextCompact]}>
-                        Kies een categorie en bekijk oefeningen voor trainingen, techniek en spelsituaties.
+                    <Text style={[styles.subtitle, isCompact && styles.subtitleCompact]}>
+                        Trainingen, oefeningen en teamontwikkeling
                     </Text>
-                </View>
-            </View>
 
-            <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, isCompact && styles.sectionTitleCompact]}>
-                    Categorieën
-                </Text>
-                <Text style={styles.sectionText}>Selecteer een onderdeel om te beginnen</Text>
-            </View>
-
-            {loading ? (
-                <ActivityIndicator size="large" color={COLORS.primary} />
-            ) : errorText ? (
-                <Text style={styles.errorText}>{errorText}</Text>
-            ) : (
-                <View style={styles.grid}>
-                    {categories.map((item) => (
-                        <ExerciseCard
-                            key={item.id}
-                            title={item.title}
-                            image={item.image_url || "https://picsum.photos/600/400?random=99"}
-                            onPress={() => router.push(`/category/${item.slug}`)}
-                        />
-                    ))}
+                    <View style={[styles.infoCard, isCompact && styles.infoCardCompact]}>
+                        <Text style={[styles.infoTitle, isCompact && styles.infoTitleCompact]}>
+                            Welkom in de clubapp
+                        </Text>
+                        <Text style={[styles.infoText, isCompact && styles.infoTextCompact]}>
+                            Kies een categorie en bekijk oefeningen voor trainingen, techniek en spelsituaties.
+                        </Text>
+                    </View>
                 </View>
-            )}
+
+                <View style={styles.sectionHeader}>
+                    <Text style={[styles.sectionTitle, isCompact && styles.sectionTitleCompact]}>
+                        Categorieën
+                    </Text>
+                    <Text style={styles.sectionText}>Selecteer een onderdeel om te beginnen</Text>
+                </View>
+
+                {loading ? (
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                ) : errorText ? (
+                    <Text style={styles.errorText}>{errorText}</Text>
+                ) : (
+                    <View style={styles.grid}>
+                        {categories.map((item) => (
+                            <ExerciseCard
+                                key={item.id}
+                                title={item.title}
+                                image={item.image_url || "https://picsum.photos/600/400?random=99"}
+                                onPress={() => router.push(`/category/${item.slug}`)}
+                            />
+                        ))}
+                    </View>
+                )}
+            </View>
         </ScrollView>
     );
 }
@@ -131,6 +133,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingTop: 12,
         paddingBottom: 28,
+    },
+    pageContent: {
+        width: "100%",
+        maxWidth: 1200,
+        alignSelf: "center",
     },
     hero: {
         backgroundColor: COLORS.surface,
