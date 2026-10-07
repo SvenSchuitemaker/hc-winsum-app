@@ -1,22 +1,25 @@
 {
   "name": "hockey-club-app",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "start": "expo start --go",
+    "android": "expo start --go",
+    "ios": "expo start --go",
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~55.0.5",
-    "expo-status-bar": "~55.0.4",
-    "react": "19.2.0",
-    "react-native": "0.83.2"
+    "expo": "~54.0.0",
+    "expo-router": "~4.0.17",
+    "expo-status-bar": "~2.0.1",
+    "react": "18.3.1",
+    "react-native": "0.76.3",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "~4.4.0"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
-    "typescript": "~5.9.2"
+    "@types/react": "~18.3.12",
+    "typescript": "~5.3.3"
   },
   "private": true
 }
