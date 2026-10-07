@@ -1,16 +1,22 @@
-import { Link, router } from "expo-router";
+import { Link, router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { signIn } from "../lib/auth";
 
 export default function LoginScreen() {
+    const params = useLocalSearchParams<{ registered?: string }>();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [errorText, setErrorText] = useState("");
 
     async function handleLogin() {
+        if (!email.trim() || !password) {
+            setErrorText("Vul je e-mailadres en wachtwoord in.");
+            return;
+        }
+
         try {
             setLoading(true);
             setErrorText("");
@@ -28,6 +34,14 @@ export default function LoginScreen() {
             <View style={styles.card}>
                 <Text style={styles.title}>Welkom terug</Text>
                 <Text style={styles.subtitle}>Log in met je account</Text>
+
+                {params.registered === "1" && (
+                    <View style={styles.successBox}>
+                        <Text style={styles.successText}>
+                            Je account is aangemaakt. Bevestig je e-mailadres als je een bevestigingsmail hebt ontvangen en log daarna hier in.
+                        </Text>
+                    </View>
+                )}
 
                 <TextInput
                     style={styles.input}
@@ -90,6 +104,19 @@ const styles = StyleSheet.create({
         color: COLORS.primaryLight,
         fontSize: 15,
         marginBottom: SPACING.lg,
+    },
+    successBox: {
+        backgroundColor: COLORS.surfaceLight,
+        borderWidth: 1,
+        borderColor: COLORS.primary,
+        borderRadius: RADIUS.md,
+        padding: 12,
+        marginBottom: SPACING.md,
+    },
+    successText: {
+        color: COLORS.text,
+        fontSize: 14,
+        lineHeight: 20,
     },
     input: {
         backgroundColor: COLORS.surfaceLight,
