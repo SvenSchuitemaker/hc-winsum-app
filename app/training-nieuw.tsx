@@ -865,6 +865,7 @@ export default function TrainingNieuwScreen() {
 
                             <ScrollView
                                 horizontal
+                                style={styles.categoryTabsScroll}
                                 showsHorizontalScrollIndicator={false}
                                 contentContainerStyle={styles.categoryTabs}
                             >
@@ -1152,7 +1153,7 @@ const styles = StyleSheet.create({
     exerciseModal: {
         width: "100%",
         maxWidth: 980,
-        height: "88%",
+        height: "92%",
         backgroundColor: COLORS.background,
         borderRadius: RADIUS.xl,
         borderWidth: 1,
@@ -1191,14 +1192,27 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.border,
     },
+    categoryTabsScroll: {
+        flexGrow: 0,
+        flexShrink: 0,
+        maxHeight: 64,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
     categoryTabs: {
         paddingHorizontal: SPACING.md,
-        paddingVertical: 12,
+        paddingVertical: 10,
         gap: 8,
+        alignItems: "center",
+        flexGrow: 0,
     },
     categoryTab: {
-        paddingHorizontal: 14,
-        paddingVertical: 9,
+        height: 42,
+        flexGrow: 0,
+        flexShrink: 0,
+        alignSelf: "center",
+        justifyContent: "center",
+        paddingHorizontal: 15,
         borderRadius: RADIUS.pill,
         backgroundColor: COLORS.surface,
         borderWidth: 1,
@@ -1220,14 +1234,16 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     exerciseGrid: {
-        padding: SPACING.md,
-        paddingTop: 4,
+        paddingHorizontal: 12,
+        paddingTop: 12,
+        paddingBottom: 28,
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 12,
+        justifyContent: "space-between",
+        rowGap: 12,
     },
     exerciseChoiceCard: {
-        width: "48%",
+        width: "48.5%",
         backgroundColor: COLORS.surface,
         borderRadius: RADIUS.lg,
         borderWidth: 1,
@@ -1241,7 +1257,7 @@ const styles = StyleSheet.create({
     },
     exerciseChoiceImage: {
         width: "100%",
-        aspectRatio: 4 / 3,
+        aspectRatio: 1.45,
         alignItems: "flex-end",
         padding: 8,
     },
