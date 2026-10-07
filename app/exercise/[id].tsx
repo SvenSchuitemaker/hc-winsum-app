@@ -10,6 +10,7 @@ import {
     Share,
     StyleSheet,
     Text,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
@@ -54,6 +55,7 @@ const fallbackImage = "https://picsum.photos/900/600?random=77";
 export default function ExerciseDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const { user, role } = useAuth();
+    const { width } = useWindowDimensions();
 
     const [exercise, setExercise] = useState<DbExercise | null>(null);
     const [loading, setLoading] = useState(true);
@@ -63,6 +65,7 @@ export default function ExerciseDetailScreen() {
     const [deleting, setDeleting] = useState(false);
 
     const isAdmin = role === "super_admin";
+    const isDesktop = width >= 900;
 
     useEffect(() => {
         if (id) {
@@ -259,75 +262,77 @@ export default function ExerciseDetailScreen() {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <View style={styles.imageWrap}>
-                <Image
-                    source={{ uri: exercise.image_url || fallbackImage }}
-                    style={styles.image}
-                    resizeMode="contain"
-                />
-            </View>
-
-            <View style={styles.titleRow}>
-                <View style={styles.titleWrap}>
-                    <Text style={styles.pageTitle}>{exercise.title}</Text>
-                    {!!exercise.subtitle && <Text style={styles.subtitle}>{exercise.subtitle}</Text>}
+            <View style={[styles.pageContent, isDesktop && styles.pageContentDesktop]}>
+                <View style={[styles.imageWrap, isDesktop && styles.imageWrapDesktop]}>
+                    <Image
+                        source={{ uri: exercise.image_url || fallbackImage }}
+                        style={styles.image}
+                        resizeMode="contain"
+                    />
                 </View>
 
-                <Pressable
-                    style={styles.favoriteButton}
-                    onPress={toggleFavorite}
-                    disabled={favoriteLoading}
-                >
-                    {favoriteLoading ? (
-                        <ActivityIndicator color={COLORS.text} />
-                    ) : (
-                        <Ionicons
-                            name={isFavorite ? "heart" : "heart-outline"}
-                            size={28}
-                            color={isFavorite ? "#ff6b81" : COLORS.text}
-                        />
-                    )}
-                </Pressable>
-            </View>
-
-            {isAdmin && (
-                <View style={styles.adminActionRow}>
-                    <Pressable
-                        style={styles.iconActionButton}
-                        onPress={() => router.push(`/exercise-bewerk/${exercise.id}`)}
-                    >
-                        <Ionicons name="brush-outline" size={20} color={COLORS.text} />
-                    </Pressable>
+                <View style={styles.titleRow}>
+                    <View style={styles.titleWrap}>
+                        <Text style={styles.pageTitle}>{exercise.title}</Text>
+                        {!!exercise.subtitle && <Text style={styles.subtitle}>{exercise.subtitle}</Text>}
+                    </View>
 
                     <Pressable
-                        style={[styles.deleteIconButton, deleting && styles.deleteButtonDisabled]}
-                        onPress={confirmDelete}
-                        disabled={deleting}
+                        style={styles.favoriteButton}
+                        onPress={toggleFavorite}
+                        disabled={favoriteLoading}
                     >
-                        {deleting ? (
-                            <ActivityIndicator size="small" color="#C0392B" />
+                        {favoriteLoading ? (
+                            <ActivityIndicator color={COLORS.text} />
                         ) : (
-                            <Ionicons name="trash-outline" size={20} color="#C0392B" />
+                            <Ionicons
+                                name={isFavorite ? "heart" : "heart-outline"}
+                                size={28}
+                                color={isFavorite ? "#ff6b81" : COLORS.text}
+                            />
                         )}
                     </Pressable>
                 </View>
-            )}
 
-            <View style={styles.badgesRow}>
-                {!!exercise.difficulty && <InfoBadge label={exercise.difficulty} />}
-                {exercise.audience?.map((item) => (
-                    <InfoBadge key={item} label={item} />
-                ))}
+                {isAdmin && (
+                    <View style={styles.adminActionRow}>
+                        <Pressable
+                            style={styles.iconActionButton}
+                            onPress={() => router.push(`/exercise-bewerk/${exercise.id}`)}
+                        >
+                            <Ionicons name="brush-outline" size={20} color={COLORS.text} />
+                        </Pressable>
+
+                        <Pressable
+                            style={[styles.deleteIconButton, deleting && styles.deleteButtonDisabled]}
+                            onPress={confirmDelete}
+                            disabled={deleting}
+                        >
+                            {deleting ? (
+                                <ActivityIndicator size="small" color="#C0392B" />
+                            ) : (
+                                <Ionicons name="trash-outline" size={20} color="#C0392B" />
+                            )}
+                        </Pressable>
+                    </View>
+                )}
+
+                <View style={styles.badgesRow}>
+                    {!!exercise.difficulty && <InfoBadge label={exercise.difficulty} />}
+                    {exercise.audience?.map((item) => (
+                        <InfoBadge key={item} label={item} />
+                    ))}
+                </View>
+
+                <Section title="Uitleg" text={exercise.explanation} />
+                <Section title="Instructies" text={exercise.instructions} />
+                <Section title="Vereenvoudiging" text={exercise.simplify} />
+                <Section title="Uitbouw" text={exercise.build_up} />
+
+                <Pressable style={styles.button} onPress={handleShare}>
+                    <Text style={styles.buttonText}>Oefening delen</Text>
+                </Pressable>
             </View>
-
-            <Section title="Uitleg" text={exercise.explanation} />
-            <Section title="Instructies" text={exercise.instructions} />
-            <Section title="Vereenvoudiging" text={exercise.simplify} />
-            <Section title="Uitbouw" text={exercise.build_up} />
-
-            <Pressable style={styles.button} onPress={handleShare}>
-                <Text style={styles.buttonText}>Oefening delen</Text>
-            </Pressable>
         </ScrollView>
     );
 }
@@ -341,6 +346,14 @@ const styles = StyleSheet.create({
         padding: SPACING.md,
         paddingBottom: SPACING.xxl,
     },
+    pageContent: {
+        width: "100%",
+    },
+    pageContentDesktop: {
+        width: "100%",
+        maxWidth: 1180,
+        alignSelf: "center",
+    },
     imageWrap: {
         width: "100%",
         aspectRatio: 1,
@@ -348,6 +361,10 @@ const styles = StyleSheet.create({
         overflow: "hidden",
         marginBottom: SPACING.lg,
         backgroundColor: "#4EAF00",
+    },
+    imageWrapDesktop: {
+        aspectRatio: 16 / 9,
+        maxHeight: 640,
     },
     image: {
         width: "100%",
