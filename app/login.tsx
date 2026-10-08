@@ -8,7 +8,7 @@ import { supabase } from "../lib/supabase";
 
 const PENDING_CLUB_KEY = "pending_registration_club";
 
-type PendingClub = {
+type PendingRegistration = {
     email: string;
     clubId: number;
     clubName: string;
@@ -26,16 +26,16 @@ export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
     const [errorText, setErrorText] = useState("");
 
-    async function attachPendingClub(userId: string, loginEmail: string) {
+    async function applyPendingRegistration(userId: string, loginEmail: string) {
         if (!supabase) return;
 
         const stored = await AsyncStorage.getItem(PENDING_CLUB_KEY);
         if (!stored) return;
 
-        let pending: PendingClub;
+        let pending: PendingRegistration;
 
         try {
-            pending = JSON.parse(stored) as PendingClub;
+            pending = JSON.parse(stored) as PendingRegistration;
         } catch {
             await AsyncStorage.removeItem(PENDING_CLUB_KEY);
             return;
@@ -49,16 +49,17 @@ export default function LoginScreen() {
             .from("profiles")
             .update({
                 club_id: pending.clubId,
-                ...(pending.fullName !== undefined ? { full_name: pending.fullName.trim() || null } : {}),
-                ...(pending.phone !== undefined ? { phone: pending.phone.trim() || null } : {}),
-                ...(pending.specialty !== undefined ? { specialty: pending.specialty.trim() || null } : {}),
-                ...(pending.ageGroups !== undefined ? { age_groups: pending.ageGroups } : {}),
-                ...(pending.bio !== undefined ? { bio: pending.bio.trim() || null } : {}),
+                full_name: pending.fullName?.trim() || null,
+                phone: pending.phone?.trim() || null,
+                specialty: pending.specialty?.trim() || null,
+                age_groups: pending.ageGroups || [],
+                bio: pending.bio?.trim() || null,
             })
             .eq("id", userId);
 
-        if (error) throw error;
-        await AsyncStorage.removeItem(PENDING_CLUB_KEY);
+        if (!error) {
+            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
+        }
     }
 
     async function handleLogin() {
@@ -75,7 +76,7 @@ export default function LoginScreen() {
             const data = await signIn(normalizedEmail, password);
 
             if (data.user?.id) {
-                await attachPendingClub(data.user.id, normalizedEmail);
+                await applyPendingRegistration(data.user.id, normalizedEmail);
             }
 
             router.replace("/");
@@ -95,7 +96,7 @@ export default function LoginScreen() {
                 {params.registered === "1" && (
                     <View style={styles.successBox}>
                         <Text style={styles.successText}>
-                            Je account is aangemaakt. Bevestig je e-mailadres als je een bevestigingsmail hebt ontvangen en log daarna hier in.
+                            Je account is aangemaakt. Bevestig je e-mailadres als je een bevestigingsmail hebt ontvangen en log daarna hier in. Je ingevulde trainerprofiel wordt automatisch opgeslagen.
                         </Text>
                     </View>
                 )}

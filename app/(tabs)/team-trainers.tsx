@@ -115,6 +115,7 @@ export default function TeamTrainersScreen() {
                         .select("id, email, role, full_name, phone, specialty, age_groups")
                         .eq("club_id", loadedProfile.club_id)
                         .eq("role", "trainer")
+                        .order("full_name", { ascending: true, nullsFirst: false })
                         .order("email", { ascending: true }),
                 ]);
 
@@ -330,9 +331,6 @@ export default function TeamTrainersScreen() {
                                     <Text style={styles.trainerName}>
                                         {trainer.full_name?.trim() || trainer.email || "Onbekende trainer"}
                                     </Text>
-                                    {!!trainer.full_name && (
-                                        <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
-                                    )}
                                     <Text style={styles.trainerRole}>
                                         {trainer.specialty || "Geen specialisme ingevuld"}
                                     </Text>
