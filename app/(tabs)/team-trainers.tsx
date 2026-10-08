@@ -328,7 +328,7 @@ export default function TeamTrainersScreen() {
                             <View key={trainer.id} style={styles.trainerItem}>
                                 <View style={styles.trainerInfo}>
                                     <Text style={styles.trainerName}>
-                                        {trainer.full_name || trainer.email || "Naam niet ingevuld"}
+                                        {trainer.full_name?.trim() || trainer.email || "Onbekende trainer"}
                                     </Text>
                                     {!!trainer.full_name && (
                                         <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
