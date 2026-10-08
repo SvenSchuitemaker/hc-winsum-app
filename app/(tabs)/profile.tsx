@@ -1,3 +1,4 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -32,6 +33,7 @@ type ProfileRow = {
 
 export default function ProfileScreen() {
     const { user, role } = useAuth();
+    const canViewDashboard = role === "head_trainer" || role === "super_admin";
     const [profile, setProfile] = useState<ProfileRow | null>(null);
     const [teams, setTeams] = useState<TeamRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -183,6 +185,24 @@ export default function ProfileScreen() {
             <View style={styles.card}>
                 <Text style={styles.title}>Profiel</Text>
 
+                {canViewDashboard && (
+                    <Pressable
+                        style={styles.dashboardButton}
+                        onPress={() => router.push("/dashboard")}
+                    >
+                        <View style={styles.dashboardButtonIcon}>
+                            <Ionicons name="stats-chart-outline" size={24} color={COLORS.text} />
+                        </View>
+                        <View style={styles.dashboardButtonTextWrap}>
+                            <Text style={styles.dashboardButtonTitle}>Hoofdtrainer dashboard</Text>
+                            <Text style={styles.dashboardButtonText}>
+                                Bekijk trainers, teams, trainingen en oefenstatistieken.
+                            </Text>
+                        </View>
+                        <Ionicons name="chevron-forward-outline" size={22} color={COLORS.primaryLight} />
+                    </Pressable>
+                )}
+
                 <View style={styles.infoBlock}>
                     <Text style={styles.label}>E-mail</Text>
                     <Text style={styles.value}>{profile?.email || user.email || "-"}</Text>
@@ -269,6 +289,39 @@ const styles = StyleSheet.create({
         lineHeight: 24,
         textAlign: "center",
         marginBottom: SPACING.lg,
+    },
+    dashboardButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        backgroundColor: COLORS.primary,
+        borderRadius: RADIUS.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    dashboardButtonIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 13,
+        backgroundColor: "rgba(255,255,255,0.12)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    dashboardButtonTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    dashboardButtonTitle: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: "900",
+        marginBottom: 3,
+    },
+    dashboardButtonText: {
+        color: COLORS.text,
+        opacity: 0.82,
+        fontSize: 13,
+        lineHeight: 18,
     },
     infoBlock: {
         backgroundColor: COLORS.surfaceLight,
