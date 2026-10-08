@@ -42,6 +42,15 @@ type TrainingRow = {
     created_at: string;
 };
 
+type TrainingEvaluationRow = {
+    training_id: number;
+    author_user_id: string;
+    what_went_well: string | null;
+    what_to_improve: string | null;
+    next_time_notes: string | null;
+    attendance_note: string | null;
+};
+
 type CategoryRow = {
     slug: string;
     title: string;
@@ -67,6 +76,7 @@ type DashboardData = {
     categories: CategoryRow[];
     exercises: ExerciseRow[];
     trainingBlocks: TrainingBlockRow[];
+    evaluations: TrainingEvaluationRow[];
 };
 
 function formatDate(dateString: string | null) {
@@ -235,6 +245,7 @@ export default function DashboardScreen() {
             let teamTrainers: TeamTrainerRow[] = [];
             let trainings: TrainingRow[] = [];
             let trainingBlocks: TrainingBlockRow[] = [];
+            let evaluations: TrainingEvaluationRow[] = [];
 
             if (teamIds.length > 0) {
                 const [
@@ -261,13 +272,22 @@ export default function DashboardScreen() {
                 const trainingIds = trainings.map((training) => training.id);
 
                 if (trainingIds.length > 0) {
-                    const { data: blockData, error: blockError } = await supabase
-                        .from("training_blocks")
-                        .select("training_id, exercise_id")
-                        .in("training_id", trainingIds);
+                    const [
+                        { data: blockData, error: blockError },
+                        { data: evaluationData, error: evaluationError },
+                    ] = await Promise.all([
+                        supabase.from("training_blocks")
+                            .select("training_id, exercise_id")
+                            .in("training_id", trainingIds),
+                        supabase.from("training_notes")
+                            .select("training_id, author_user_id, what_went_well, what_to_improve, next_time_notes, attendance_note")
+                            .in("training_id", trainingIds),
+                    ]);
 
                     if (blockError) throw blockError;
+                    if (evaluationError) throw evaluationError;
                     trainingBlocks = (blockData as TrainingBlockRow[]) || [];
+                    evaluations = (evaluationData as TrainingEvaluationRow[]) || [];
                 }
             }
 
@@ -280,6 +300,7 @@ export default function DashboardScreen() {
                 categories,
                 exercises,
                 trainingBlocks,
+                evaluations,
             });
         } catch (error) {
             setErrorText(
@@ -405,6 +426,26 @@ export default function DashboardScreen() {
             team: training.team_id ? teamById.get(training.team_id)?.name || "Onbekend team" : "Geen team",
         }));
 
+        const trainingById = new Map(data.trainings.map((training) => [training.id, training]));
+        const completedTrainings = data.evaluations
+            .filter((evaluation) =>
+                [evaluation.what_went_well, evaluation.what_to_improve, evaluation.next_time_notes, evaluation.attendance_note]
+                    .some((value) => !!value?.trim())
+            )
+            .map((evaluation) => {
+                const training = trainingById.get(evaluation.training_id);
+                if (!training) return null;
+                return {
+                    ...training,
+                    trainer: displayName(profileById.get(training.user_id)),
+                    evaluator: displayName(profileById.get(evaluation.author_user_id)),
+                    team: training.team_id ? teamById.get(training.team_id)?.name || "Onbekend team" : "Geen team",
+                    evaluation,
+                };
+            })
+            .filter((training): training is NonNullable<typeof training> => training !== null)
+            .sort((a, b) => (b.training_date || "").localeCompare(a.training_date || ""));
+
         const assignedTrainerIds = new Set(data.teamTrainers.map((link) => link.user_id));
         const unassignedTrainers = data.profiles.filter(
             (profile) => !assignedTrainerIds.has(profile.id)
@@ -421,6 +462,7 @@ export default function DashboardScreen() {
             mostActiveTrainer,
             busiestTeam,
             recentTrainings,
+            completedTrainings,
             unassignedTrainers,
         };
     }, [data]);
@@ -636,6 +678,42 @@ export default function DashboardScreen() {
 
                 <View style={styles.panel}>
                     <SectionTitle
+                        icon="checkmark-done-outline"
+                        title="Afgeronde trainingen"
+                        subtitle="Trainingen met een ingevulde evaluatie"
+                    />
+                    {stats.completedTrainings.length === 0 ? (
+                        <Text style={styles.emptyText}>Er zijn nog geen trainingen geëvalueerd.</Text>
+                    ) : (
+                        stats.completedTrainings.map((training) => (
+                            <View key={training.id} style={styles.evaluationCard}>
+                                <Pressable onPress={() => router.push(`/training/${training.id}`)}>
+                                    <Text style={styles.evaluationTitle}>{training.title}  <Ionicons name="arrow-forward-outline" size={16} color={COLORS.primaryLight} /></Text>
+                                    <Text style={styles.evaluationMeta}>
+                                        {formatDate(training.training_date)} · {training.team} · {training.trainer}
+                                    </Text>
+                                    {training.evaluator !== training.trainer && (
+                                        <Text style={styles.evaluationMeta}>Evaluatie door {training.evaluator}</Text>
+                                    )}
+                                </Pressable>
+                                {([
+                                    ["Wat ging goed?", training.evaluation.what_went_well],
+                                    ["Wat kan beter?", training.evaluation.what_to_improve],
+                                    ["Aandacht voor volgende keer", training.evaluation.next_time_notes],
+                                    ["Opkomst / bijzonderheden", training.evaluation.attendance_note],
+                                ] as const).filter(([, value]) => !!value?.trim()).map(([label, value]) => (
+                                    <View key={label} style={styles.evaluationSection}>
+                                        <Text style={styles.evaluationLabel}>{label}</Text>
+                                        <Text style={styles.evaluationBody}>{value}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        ))
+                    )}
+                </View>
+
+                <View style={styles.panel}>
+                    <SectionTitle
                         icon="pulse-outline"
                         title="Recente activiteit"
                         subtitle="De laatst aangemaakte trainingen"
@@ -665,6 +743,12 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+    evaluationCard: { padding: SPACING.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surfaceLight, borderRadius: RADIUS.lg, marginBottom: SPACING.md },
+    evaluationTitle: { color: COLORS.text, fontSize: 17, fontWeight: "800", marginBottom: 5 },
+    evaluationMeta: { color: COLORS.mutedText, fontSize: 13, lineHeight: 20 },
+    evaluationSection: { marginTop: SPACING.md },
+    evaluationLabel: { color: COLORS.primaryLight, fontSize: 13, fontWeight: "800", marginBottom: 4 },
+    evaluationBody: { color: COLORS.text, fontSize: 14, lineHeight: 21 },
     container: {
         flex: 1,
         backgroundColor: COLORS.background,
