@@ -21,34 +21,36 @@ type ClubRow = {
 };
 
 const PENDING_CLUB_KEY = "pending_registration_club";
+const AGE_GROUP_OPTIONS = ["JO8", "JO10", "JO12", "JO14", "JO16", "JO18", "MO8", "MO10", "MO12", "MO14", "MO16", "MO18", "Senioren"];
 
 export default function RegisterScreen() {
+    const [fullName, setFullName] = useState("");
+    const [phone, setPhone] = useState("");
+    const [specialty, setSpecialty] = useState("");
+    const [ageGroups, setAgeGroups] = useState<string[]>([]);
+    const [bio, setBio] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [clubCode, setClubCode] = useState("");
     const [loading, setLoading] = useState(false);
     const [errorText, setErrorText] = useState("");
 
-    async function attachClubToProfile(userId: string, clubId: number) {
-        if (!supabase) return;
-
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select("club_id")
-            .eq("id", userId)
-            .maybeSingle();
-
-        if (profile?.club_id) return;
-
-        await supabase
-            .from("profiles")
-            .update({ club_id: clubId })
-            .eq("id", userId);
+    async function saveRegistrationProfile(userId: string, clubId: number) {
+        if (!supabase) throw new Error("Supabase is niet geladen.");
+        const { error } = await supabase.from("profiles").update({
+            club_id: clubId,
+            full_name: fullName.trim(),
+            phone: phone.trim() || null,
+            specialty: specialty.trim() || null,
+            age_groups: ageGroups,
+            bio: bio.trim() || null,
+        }).eq("id", userId);
+        if (error) throw error;
     }
 
     async function handleRegister() {
-        if (!email.trim() || !password.trim() || !clubCode.trim()) {
-            setErrorText("Vul e-mail, wachtwoord en clubcode in.");
+        if (!fullName.trim() || !email.trim() || !password.trim() || !clubCode.trim()) {
+            setErrorText("Vul je naam, e-mail, wachtwoord en clubcode in.");
             return;
         }
 
@@ -91,7 +93,7 @@ export default function RegisterScreen() {
             }
 
             if (signUpData.session) {
-                await attachClubToProfile(userId, club.id);
+                await saveRegistrationProfile(userId, club.id);
                 await AsyncStorage.removeItem(PENDING_CLUB_KEY);
                 router.replace("/");
                 return;
@@ -103,6 +105,11 @@ export default function RegisterScreen() {
                     email: normalizedEmail,
                     clubId: club.id,
                     clubName: club.name,
+                    fullName: fullName.trim(),
+                    phone: phone.trim(),
+                    specialty: specialty.trim(),
+                    ageGroups,
+                    bio: bio.trim(),
                 })
             );
 
@@ -128,6 +135,9 @@ export default function RegisterScreen() {
                 <Text style={styles.text}>
                     Maak een account aan en koppel jezelf direct aan je club met de clubcode.
                 </Text>
+
+                <Text style={styles.label}>Volledige naam</Text>
+                <TextInput style={styles.input} placeholder="Voor- en achternaam" placeholderTextColor={COLORS.mutedText} autoCapitalize="words" value={fullName} onChangeText={setFullName} />
 
                 <Text style={styles.label}>E-mail</Text>
                 <TextInput
@@ -159,6 +169,27 @@ export default function RegisterScreen() {
                     value={clubCode}
                     onChangeText={setClubCode}
                 />
+
+                <Text style={styles.label}>Telefoonnummer</Text>
+                <TextInput style={styles.input} placeholder="Telefoonnummer" placeholderTextColor={COLORS.mutedText} keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+
+                <Text style={styles.label}>Specialisme</Text>
+                <TextInput style={styles.input} placeholder="Bijv. techniek of keeperstraining" placeholderTextColor={COLORS.mutedText} value={specialty} onChangeText={setSpecialty} />
+
+                <Text style={styles.label}>Leeftijdsgroepen</Text>
+                <View style={styles.chipContainer}>
+                    {AGE_GROUP_OPTIONS.map((group) => {
+                        const selected = ageGroups.includes(group);
+                        return (
+                            <Pressable key={group} style={[styles.chip, selected && styles.chipSelected]} onPress={() => setAgeGroups(current => selected ? current.filter(item => item !== group) : [...current, group])}>
+                                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{group}</Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+
+                <Text style={styles.label}>Over mij</Text>
+                <TextInput style={[styles.input, styles.bioInput]} placeholder="Vertel iets over jezelf" placeholderTextColor={COLORS.mutedText} multiline textAlignVertical="top" value={bio} onChangeText={setBio} />
 
                 {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
 
@@ -228,6 +259,12 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.border,
     },
+    chipContainer: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: SPACING.md },
+    chip: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.surfaceLight },
+    chipSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+    chipText: { color: COLORS.mutedText, fontWeight: "700" },
+    chipTextSelected: { color: COLORS.text },
+    bioInput: { minHeight: 100 },
     button: {
         backgroundColor: COLORS.primary,
         borderRadius: RADIUS.md,
