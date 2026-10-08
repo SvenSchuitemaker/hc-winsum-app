@@ -1,5 +1,5 @@
 import type { Session, User } from "@supabase/supabase-js";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type UserRole = "super_admin" | "head_trainer" | "trainer" | null;
@@ -23,8 +23,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [role, setRole] = useState<UserRole>(null);
     const [loading, setLoading] = useState(true);
+    const roleRequestId = useRef(0);
 
     async function loadProfileRole(userId: string | undefined) {
+        const requestId = ++roleRequestId.current;
+
         if (!supabase || !userId) {
             setRole(null);
             return;
@@ -35,6 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .select("role")
             .eq("id", userId)
             .maybeSingle();
+
+        if (requestId !== roleRequestId.current) return;
 
         if (error) {
             setRole(null);
@@ -55,34 +60,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             };
         }
 
-        async function applySession(nextSession: Session | null) {
-            if (!mounted) return;
-
-            setSession(nextSession);
-            setUser(nextSession?.user ?? null);
-            await loadProfileRole(nextSession?.user?.id);
-
+        const loadingFallback = setTimeout(() => {
             if (mounted) {
+                setLoading(false);
+            }
+        }, 2500);
+
+        async function init() {
+            try {
+                const {
+                    data: { session: initialSession },
+                } = await supabase.auth.getSession();
+
+                if (!mounted) return;
+
+                setSession(initialSession);
+                setUser(initialSession?.user ?? null);
+                setLoading(false);
+
+                if (initialSession?.user?.id) {
+                    void loadProfileRole(initialSession.user.id);
+                } else {
+                    setRole(null);
+                }
+            } catch {
+                if (!mounted) return;
+
+                setSession(null);
+                setUser(null);
+                setRole(null);
                 setLoading(false);
             }
         }
 
-        async function init() {
-            const {
-                data: { session: initialSession },
-            } = await supabase.auth.getSession();
+        void init();
 
-            await applySession(initialSession);
-        }
+        const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+            if (!mounted) return;
 
-        init();
+            setSession(nextSession);
+            setUser(nextSession?.user ?? null);
+            setLoading(false);
 
-        const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-            await applySession(nextSession);
+            const nextUserId = nextSession?.user?.id;
+
+            setTimeout(() => {
+                if (!mounted) return;
+
+                if (nextUserId) {
+                    void loadProfileRole(nextUserId);
+                } else {
+                    roleRequestId.current += 1;
+                    setRole(null);
+                }
+            }, 0);
         });
 
         return () => {
             mounted = false;
+            clearTimeout(loadingFallback);
             listener.subscription.unsubscribe();
         };
     }, []);
