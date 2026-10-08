@@ -12,6 +12,11 @@ type PendingClub = {
     email: string;
     clubId: number;
     clubName: string;
+    fullName?: string;
+    phone?: string;
+    specialty?: string;
+    ageGroups?: string[];
+    bio?: string;
 };
 
 export default function LoginScreen() {
@@ -40,25 +45,20 @@ export default function LoginScreen() {
             return;
         }
 
-        const { data: profile } = await supabase
-            .from("profiles")
-            .select("club_id")
-            .eq("id", userId)
-            .maybeSingle();
-
-        if (profile?.club_id) {
-            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
-            return;
-        }
-
         const { error } = await supabase
             .from("profiles")
-            .update({ club_id: pending.clubId })
+            .update({
+                club_id: pending.clubId,
+                ...(pending.fullName !== undefined ? { full_name: pending.fullName.trim() || null } : {}),
+                ...(pending.phone !== undefined ? { phone: pending.phone.trim() || null } : {}),
+                ...(pending.specialty !== undefined ? { specialty: pending.specialty.trim() || null } : {}),
+                ...(pending.ageGroups !== undefined ? { age_groups: pending.ageGroups } : {}),
+                ...(pending.bio !== undefined ? { bio: pending.bio.trim() || null } : {}),
+            })
             .eq("id", userId);
 
-        if (!error) {
-            await AsyncStorage.removeItem(PENDING_CLUB_KEY);
-        }
+        if (error) throw error;
+        await AsyncStorage.removeItem(PENDING_CLUB_KEY);
     }
 
     async function handleLogin() {
