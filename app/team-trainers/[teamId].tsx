@@ -24,6 +24,11 @@ type TrainerRow = {
     email: string | null;
     role: "super_admin" | "head_trainer" | "trainer" | null;
     club_id: number | null;
+    full_name: string | null;
+    phone: string | null;
+    specialty: string | null;
+    age_groups: string[] | null;
+    bio: string | null;
 };
 
 type TeamTrainerRow = {
@@ -84,7 +89,7 @@ export default function TeamTrainersScreen() {
             ] = await Promise.all([
                 supabase
                     .from("profiles")
-                    .select("id, email, role, club_id")
+                    .select("id, email, role, club_id, full_name, phone, specialty, age_groups, bio")
                     .eq("club_id", loadedTeam.club_id)
                     .eq("role", "trainer")
                     .order("email", { ascending: true }),
@@ -234,8 +239,28 @@ export default function TeamTrainersScreen() {
                         return (
                             <View key={trainer.id} style={styles.trainerItem}>
                                 <View style={styles.trainerInfo}>
-                                    <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
-                                    <Text style={styles.trainerRole}>{trainer.role || "-"}</Text>
+                                    <Text style={styles.trainerName}>
+                                        {trainer.full_name || trainer.email || "Naam niet ingevuld"}
+                                    </Text>
+                                    {!!trainer.full_name && (
+                                        <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
+                                    )}
+                                    <Text style={styles.trainerRole}>
+                                        {trainer.specialty || "Geen specialisme ingevuld"}
+                                    </Text>
+                                    {!!trainer.phone && (
+                                        <Text style={styles.trainerMeta}>{trainer.phone}</Text>
+                                    )}
+                                    {(trainer.age_groups || []).length > 0 && (
+                                        <Text style={styles.trainerMeta}>
+                                            Leeftijd: {(trainer.age_groups || []).join(", ")}
+                                        </Text>
+                                    )}
+                                    {!!trainer.bio && (
+                                        <Text style={styles.trainerBio} numberOfLines={3}>
+                                            {trainer.bio}
+                                        </Text>
+                                    )}
                                 </View>
 
                                 <Pressable
@@ -362,6 +387,12 @@ const styles = StyleSheet.create({
     trainerInfo: {
         flex: 1,
     },
+    trainerName: {
+        color: COLORS.text,
+        fontSize: 17,
+        fontWeight: "900",
+        marginBottom: 3,
+    },
     trainerEmail: {
         color: COLORS.text,
         fontSize: 16,
@@ -369,9 +400,22 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     trainerRole: {
-        color: COLORS.mutedText,
+        color: COLORS.primaryLight,
         fontSize: 14,
         fontWeight: "700",
+        marginTop: 3,
+    },
+    trainerMeta: {
+        color: COLORS.mutedText,
+        fontSize: 13,
+        lineHeight: 18,
+        marginTop: 3,
+    },
+    trainerBio: {
+        color: COLORS.mutedText,
+        fontSize: 13,
+        lineHeight: 19,
+        marginTop: 7,
     },
     linkButton: {
         minWidth: 120,

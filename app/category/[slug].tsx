@@ -20,10 +20,19 @@ type DbExercise = {
     image_url: string | null;
     difficulty: string | null;
     audience: string[] | null;
+    subtitle: string | null;
+    explanation: string | null;
 };
 
 const difficultyOptions = ["Alle", "Makkelijk", "Gemiddeld", "Moeilijk"];
 const audienceOptions = ["Alle", "JO8", "JO10", "JO12", "JO14", "JO16", "JO18", "MO8", "MO10", "MO12", "MO14", "MO16", "MO18", "Senioren"];
+const sortOptions = ["A-Z", "Makkelijk eerst", "Moeilijk eerst"];
+
+const difficultyRank: Record<string, number> = {
+    Makkelijk: 1,
+    Gemiddeld: 2,
+    Moeilijk: 3,
+};
 
 export default function CategoryScreen() {
     const { slug } = useLocalSearchParams<{ slug: string }>();
@@ -37,6 +46,7 @@ export default function CategoryScreen() {
     const [search, setSearch] = useState("");
     const [difficultyFilter, setDifficultyFilter] = useState("Alle");
     const [audienceFilter, setAudienceFilter] = useState("Alle");
+    const [sortBy, setSortBy] = useState("A-Z");
 
     useEffect(() => {
         if (slug) {
@@ -57,7 +67,7 @@ export default function CategoryScreen() {
                     supabase.from("categories").select("*").eq("slug", slug).single(),
                     supabase
                         .from("exercises")
-                        .select("id, category_slug, title, image_url, difficulty, audience")
+                        .select("id, category_slug, title, image_url, difficulty, audience, subtitle, explanation")
                         .eq("category_slug", slug)
                         .order("id", { ascending: true }),
                 ]);
@@ -81,21 +91,50 @@ export default function CategoryScreen() {
     }
 
     const filteredItems = useMemo(() => {
-        return items.filter((item) => {
-            const matchesSearch = item.title
-                .toLowerCase()
-                .includes(search.trim().toLowerCase());
+        const normalizedSearch = search.trim().toLowerCase();
 
+        const filtered = items.filter((item) => {
+            const searchableText = [item.title, item.subtitle, item.explanation]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
+
+            const matchesSearch = !normalizedSearch || searchableText.includes(normalizedSearch);
             const matchesDifficulty =
                 difficultyFilter === "Alle" || item.difficulty === difficultyFilter;
-
             const matchesAudience =
                 audienceFilter === "Alle" ||
                 (item.audience ?? []).includes(audienceFilter);
 
             return matchesSearch && matchesDifficulty && matchesAudience;
         });
-    }, [items, search, difficultyFilter, audienceFilter]);
+
+        return filtered.sort((a, b) => {
+            if (sortBy === "Makkelijk eerst") {
+                return (difficultyRank[a.difficulty || ""] || 99) -
+                    (difficultyRank[b.difficulty || ""] || 99) ||
+                    a.title.localeCompare(b.title);
+            }
+
+            if (sortBy === "Moeilijk eerst") {
+                return (difficultyRank[b.difficulty || ""] || 0) -
+                    (difficultyRank[a.difficulty || ""] || 0) ||
+                    a.title.localeCompare(b.title);
+            }
+
+            return a.title.localeCompare(b.title);
+        });
+    }, [items, search, difficultyFilter, audienceFilter, sortBy]);
+
+    const filtersActive =
+        !!search.trim() || difficultyFilter !== "Alle" || audienceFilter !== "Alle" || sortBy !== "A-Z";
+
+    function resetFilters() {
+        setSearch("");
+        setDifficultyFilter("Alle");
+        setAudienceFilter("Alle");
+        setSortBy("A-Z");
+    }
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -150,6 +189,35 @@ export default function CategoryScreen() {
                                 </Pressable>
                             );
                         })}
+                    </View>
+
+                    <Text style={styles.filterLabel}>Sorteren</Text>
+                    <View style={styles.chipsRow}>
+                        {sortOptions.map((option) => {
+                            const selected = sortBy === option;
+                            return (
+                                <Pressable
+                                    key={option}
+                                    style={[styles.chip, selected && styles.chipSelected]}
+                                    onPress={() => setSortBy(option)}
+                                >
+                                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                                        {option}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+
+                    <View style={styles.filterSummary}>
+                        <Text style={styles.resultCount}>
+                            {filteredItems.length} van {items.length} oefeningen gevonden
+                        </Text>
+                        {filtersActive && (
+                            <Pressable style={styles.resetButton} onPress={resetFilters}>
+                                <Text style={styles.resetButtonText}>Filters wissen</Text>
+                            </Pressable>
+                        )}
                     </View>
                 </View>
 
@@ -257,6 +325,32 @@ const styles = StyleSheet.create({
     },
     chipTextSelected: {
         color: "#FFFFFF",
+    },
+    filterSummary: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        marginTop: 2,
+    },
+    resultCount: {
+        flex: 1,
+        color: COLORS.mutedText,
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    resetButton: {
+        backgroundColor: COLORS.background,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        borderRadius: RADIUS.pill,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    resetButtonText: {
+        color: COLORS.accent,
+        fontSize: 12,
+        fontWeight: "800",
     },
     grid: {
         flexDirection: "row",

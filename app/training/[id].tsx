@@ -18,6 +18,7 @@ import { supabase } from "../../lib/supabase";
 type ExerciseRef = {
     id: number;
     title: string;
+    image_url: string | null;
 };
 
 type TeamRef = {
@@ -51,6 +52,7 @@ type TrainingDetail = {
     main_duration: number;
     match_duration: number;
     team_id: number | null;
+    share_token: string;
     teams: TeamRef | null;
 };
 
@@ -62,6 +64,7 @@ type SupabaseTrainingDetail = {
     main_duration: number;
     match_duration: number;
     team_id: number | null;
+    share_token: string;
     teams: TeamRef[] | TeamRef | null;
 };
 
@@ -126,6 +129,7 @@ export default function TrainingDetailScreen() {
             main_duration,
             match_duration,
             team_id,
+            share_token,
             teams ( id, name )
           `)
                     .eq("id", Number(id))
@@ -138,7 +142,7 @@ export default function TrainingDetailScreen() {
             title,
             duration,
             notes,
-            exercises:exercises ( id, title )
+            exercises:exercises ( id, title, image_url )
           `)
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
@@ -170,6 +174,7 @@ export default function TrainingDetailScreen() {
                 main_duration: item.main_duration,
                 match_duration: item.match_duration,
                 team_id: item.team_id,
+                share_token: item.share_token,
                 teams: normalizeRelation(item.teams),
             });
 
@@ -240,26 +245,26 @@ export default function TrainingDetailScreen() {
     async function handleShare() {
         if (!training) return;
 
+        const publicUrl = `https://svenschuitemaker.github.io/hc-winsum-app/shared-training/${training.share_token}`;
         const shareText = [
-            `*Training:* ${training.title}`,
-            training.teams?.name ? `*Team:* ${training.teams.name}` : null,
+            `Training: ${training.title}`,
+            training.teams?.name ? `Team: ${training.teams.name}` : null,
             training.training_date
-                ? `*Datum:* ${formatDateForDisplay(training.training_date)}`
+                ? `Datum: ${formatDateForDisplay(training.training_date)}`
                 : null,
             "",
-            ...blocks.flatMap((block, index) => [
-                `*${index + 1}. ${block.title}*`,
-                `${block.exercises?.title || "-"}`,
-                `${block.duration} minuten`,
-                block.notes ? `${block.notes}` : null,
-                "",
-            ]),
+            "Bekijk de volledige training met oefeningafbeeldingen:",
+            publicUrl,
         ]
             .filter(Boolean)
             .join("\n");
 
         try {
-            await Share.share({ message: shareText });
+            await Share.share({
+                title: training.title,
+                message: shareText,
+                url: publicUrl,
+            });
         } catch (error) {
             Alert.alert("Fout", error instanceof Error ? error.message : "Delen mislukt.");
         }

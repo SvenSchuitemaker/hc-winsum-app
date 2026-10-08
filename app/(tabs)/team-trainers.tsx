@@ -30,6 +30,10 @@ type TrainerRow = {
     id: string;
     email: string | null;
     role: "super_admin" | "head_trainer" | "trainer" | null;
+    full_name: string | null;
+    phone: string | null;
+    specialty: string | null;
+    age_groups: string[] | null;
 };
 
 type TeamTrainerRow = {
@@ -108,7 +112,7 @@ export default function TeamTrainersScreen() {
                         .order("name", { ascending: true }),
                     supabase
                         .from("profiles")
-                        .select("id, email, role")
+                        .select("id, email, role, full_name, phone, specialty, age_groups")
                         .eq("club_id", loadedProfile.club_id)
                         .eq("role", "trainer")
                         .order("email", { ascending: true }),
@@ -323,8 +327,19 @@ export default function TeamTrainersScreen() {
                         return (
                             <View key={trainer.id} style={styles.trainerItem}>
                                 <View style={styles.trainerInfo}>
-                                    <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
-                                    <Text style={styles.trainerRole}>{trainer.role || "-"}</Text>
+                                    <Text style={styles.trainerName}>
+                                        {trainer.full_name || trainer.email || "Naam niet ingevuld"}
+                                    </Text>
+                                    {!!trainer.full_name && (
+                                        <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
+                                    )}
+                                    <Text style={styles.trainerRole}>
+                                        {trainer.specialty || "Geen specialisme ingevuld"}
+                                    </Text>
+                                    {!!trainer.phone && <Text style={styles.trainerMeta}>{trainer.phone}</Text>}
+                                    {(trainer.age_groups || []).length > 0 && (
+                                        <Text style={styles.trainerMeta}>{(trainer.age_groups || []).join(", ")}</Text>
+                                    )}
                                 </View>
 
                                 <Pressable
@@ -447,6 +462,12 @@ const styles = StyleSheet.create({
     trainerInfo: {
         flex: 1,
     },
+    trainerName: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: "900",
+        marginBottom: 3,
+    },
     trainerEmail: {
         color: COLORS.text,
         fontSize: 16,
@@ -454,9 +475,15 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     trainerRole: {
-        color: COLORS.mutedText,
+        color: COLORS.primaryLight,
         fontSize: 14,
         fontWeight: "700",
+        marginTop: 3,
+    },
+    trainerMeta: {
+        color: COLORS.mutedText,
+        fontSize: 13,
+        marginTop: 3,
     },
     linkButton: {
         minWidth: 120,

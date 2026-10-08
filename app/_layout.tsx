@@ -65,6 +65,8 @@ export default function RootLayout() {
                         <Stack.Screen name="training-bewerk/[id]" options={withBack("Training bewerken")} />
                         <Stack.Screen name="exercise-bewerk/[id]" options={withBack("Oefening bewerken")} />
                         <Stack.Screen name="dashboard" options={withBack("Dashboard")} />
+                        <Stack.Screen name="weekoverzicht" options={withBack("Weekoverzicht")} />
+                        <Stack.Screen name="shared-training/[token]" options={withBack("Gedeelde training")} />
                     </Stack>
                 </SafeAreaView>
             </SafeAreaProvider>
