@@ -80,6 +80,7 @@ export default function PlanningScreen() {
     const { user, loading: authLoading } = useAuth();
 
     const [trainings, setTrainings] = useState<TrainingRow[]>([]);
+    const [teamOptions, setTeamOptions] = useState<TeamOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [errorText, setErrorText] = useState("");
     const [selectedTeamId, setSelectedTeamId] = useState<string>("all");
@@ -102,10 +103,38 @@ export default function PlanningScreen() {
             if (!supabase) {
                 setErrorText("Supabase is niet geladen.");
                 setTrainings([]);
+                setTeamOptions([]);
                 return;
             }
 
             if (!user) {
+                setTrainings([]);
+                return;
+            }
+
+            const { data: profile, error: profileError } = await supabase
+                .from("profiles")
+                .select("club_id")
+                .eq("id", user.id)
+                .single();
+            if (profileError) throw profileError;
+
+            if (!profile?.club_id) {
+                setTeamOptions([]);
+                setTrainings([]);
+                return;
+            }
+
+            const { data: teamsData, error: teamsError } = await supabase
+                .from("teams")
+                .select("id, name, training_days")
+                .eq("club_id", profile.club_id)
+                .order("name", { ascending: true });
+            if (teamsError) throw teamsError;
+            const clubTeams = (teamsData ?? []) as TeamOption[];
+            setTeamOptions(clubTeams);
+            const teamIds = clubTeams.map((team) => team.id);
+            if (teamIds.length === 0) {
                 setTrainings([]);
                 return;
             }
@@ -123,6 +152,7 @@ export default function PlanningScreen() {
   )
 `)
                 .not("training_date", "is", null)
+                .in("team_id", teamIds)
                 .order("training_date", { ascending: true });
 
             if (error) {
@@ -142,6 +172,7 @@ export default function PlanningScreen() {
                 error instanceof Error ? error.message : "Planning laden mislukt."
             );
             setTrainings([]);
+            setTeamOptions([]);
         } finally {
             setLoading(false);
         }
@@ -178,22 +209,6 @@ export default function PlanningScreen() {
             setDeletingTrainingId(null);
         }
     }
-
-    const teamOptions = useMemo(() => {
-        const map = new Map<number, TeamOption>();
-
-        trainings.forEach((training) => {
-            if (training.teams?.id) {
-                map.set(training.teams.id, {
-                    id: training.teams.id,
-                    name: training.teams.name,
-                    training_days: training.teams.training_days ?? null,
-                });
-            }
-        });
-
-        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-    }, [trainings]);
 
     const filteredTrainings = useMemo(() => {
         const byTeam =
