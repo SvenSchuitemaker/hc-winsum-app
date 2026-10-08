@@ -127,7 +127,7 @@ export default function PlanningScreen() {
 
             const { data: teamsData, error: teamsError } = await supabase
                 .from("teams")
-                .select("id, name, training_days")
+                .select("id, name")
                 .eq("club_id", profile.club_id)
                 .order("name", { ascending: true });
             if (teamsError) throw teamsError;
