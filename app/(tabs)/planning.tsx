@@ -4,6 +4,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -83,6 +84,7 @@ export default function PlanningScreen() {
     const [errorText, setErrorText] = useState("");
     const [selectedTeamId, setSelectedTeamId] = useState<string>("all");
     const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date()));
+    const [deletingTrainingId, setDeletingTrainingId] = useState<number | null>(null);
 
     useFocusEffect(
         useCallback(() => {
@@ -140,6 +142,49 @@ export default function PlanningScreen() {
             setTrainings([]);
         } finally {
             setLoading(false);
+        }
+    }
+
+    function confirmDeleteTraining(training: TrainingRow) {
+        Alert.alert(
+            "Training verwijderen",
+            `Weet je zeker dat je "${training.title}" uit de agenda wilt verwijderen? De volledige training wordt verwijderd.`,
+            [
+                { text: "Annuleren", style: "cancel" },
+                {
+                    text: "Verwijderen",
+                    style: "destructive",
+                    onPress: () => void deleteTraining(training.id),
+                },
+            ]
+        );
+    }
+
+    async function deleteTraining(trainingId: number) {
+        try {
+            setDeletingTrainingId(trainingId);
+
+            if (!supabase) {
+                throw new Error("Supabase is niet geladen.");
+            }
+
+            const { error } = await supabase
+                .from("trainings")
+                .delete()
+                .eq("id", trainingId);
+
+            if (error) throw error;
+
+            setTrainings((current) =>
+                current.filter((training) => training.id !== trainingId)
+            );
+        } catch (error) {
+            Alert.alert(
+                "Fout",
+                error instanceof Error ? error.message : "Training verwijderen mislukt."
+            );
+        } finally {
+            setDeletingTrainingId(null);
         }
     }
 
@@ -299,21 +344,40 @@ export default function PlanningScreen() {
                         {dayTrainings.length === 0 ? (
                             <Text style={styles.emptyText}>Geen training gepland.</Text>
                         ) : (
-                            dayTrainings.map((training) => (
-                                <Pressable
-                                    key={training.id}
-                                    style={styles.trainingCard}
-                                    onPress={() => router.push(`/training/${training.id}`)}
-                                >
-                                    <Text style={styles.trainingTitle}>{training.title}</Text>
-                                    <Text style={styles.trainingDate}>
-                                        {formatDateForDisplay(training.training_date)}
-                                    </Text>
-                                    <Text style={styles.trainingTeam}>
-                                        Team: {training.teams?.name || "Geen team"}
-                                    </Text>
-                                </Pressable>
-                            ))
+                            dayTrainings.map((training) => {
+                                const isDeleting = deletingTrainingId === training.id;
+
+                                return (
+                                    <View key={training.id} style={styles.trainingCard}>
+                                        <Pressable
+                                            style={styles.trainingCardMain}
+                                            onPress={() => router.push(`/training/${training.id}`)}
+                                            disabled={isDeleting}
+                                        >
+                                            <Text style={styles.trainingTitle}>{training.title}</Text>
+                                            <Text style={styles.trainingDate}>
+                                                {formatDateForDisplay(training.training_date)}
+                                            </Text>
+                                            <Text style={styles.trainingTeam}>
+                                                Team: {training.teams?.name || "Geen team"}
+                                            </Text>
+                                        </Pressable>
+
+                                        <Pressable
+                                            style={styles.deleteTrainingButton}
+                                            onPress={() => confirmDeleteTraining(training)}
+                                            disabled={isDeleting}
+                                            accessibilityLabel={`${training.title} verwijderen`}
+                                        >
+                                            {isDeleting ? (
+                                                <ActivityIndicator size="small" color="#E66B67" />
+                                            ) : (
+                                                <Ionicons name="trash-outline" size={20} color="#E66B67" />
+                                            )}
+                                        </Pressable>
+                                    </View>
+                                );
+                            })
                         )}
                     </View>
                 );
@@ -413,10 +477,26 @@ const styles = StyleSheet.create({
     trainingCard: {
         backgroundColor: COLORS.surfaceLight,
         borderRadius: RADIUS.lg,
-        padding: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.border,
         marginBottom: SPACING.sm,
+        flexDirection: "row",
+        alignItems: "center",
+        overflow: "hidden",
+    },
+    trainingCardMain: {
+        flex: 1,
+        padding: SPACING.md,
+        minWidth: 0,
+    },
+    deleteTrainingButton: {
+        width: 52,
+        alignSelf: "stretch",
+        alignItems: "center",
+        justifyContent: "center",
+        borderLeftWidth: 1,
+        borderLeftColor: COLORS.border,
+        backgroundColor: "rgba(192,57,43,0.08)",
     },
     trainingTitle: {
         color: COLORS.text,
