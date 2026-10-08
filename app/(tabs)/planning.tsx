@@ -4,7 +4,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
+    Modal,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -85,6 +85,8 @@ export default function PlanningScreen() {
     const [selectedTeamId, setSelectedTeamId] = useState<string>("all");
     const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date()));
     const [deletingTrainingId, setDeletingTrainingId] = useState<number | null>(null);
+    const [trainingToDelete, setTrainingToDelete] = useState<TrainingRow | null>(null);
+    const [deleteError, setDeleteError] = useState("");
 
     useFocusEffect(
         useCallback(() => {
@@ -146,18 +148,8 @@ export default function PlanningScreen() {
     }
 
     function confirmDeleteTraining(training: TrainingRow) {
-        Alert.alert(
-            "Training verwijderen",
-            `Weet je zeker dat je "${training.title}" uit de agenda wilt verwijderen? De volledige training wordt verwijderd.`,
-            [
-                { text: "Annuleren", style: "cancel" },
-                {
-                    text: "Verwijderen",
-                    style: "destructive",
-                    onPress: () => void deleteTraining(training.id),
-                },
-            ]
-        );
+        setDeleteError("");
+        setTrainingToDelete(training);
     }
 
     async function deleteTraining(trainingId: number) {
@@ -178,11 +170,10 @@ export default function PlanningScreen() {
             setTrainings((current) =>
                 current.filter((training) => training.id !== trainingId)
             );
+            setTrainingToDelete(null);
+            setDeleteError("");
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Training verwijderen mislukt."
-            );
+            setDeleteError(error instanceof Error ? error.message : "Training verwijderen mislukt.");
         } finally {
             setDeletingTrainingId(null);
         }
@@ -382,11 +373,40 @@ export default function PlanningScreen() {
                     </View>
                 );
             })}
+            <Modal visible={trainingToDelete !== null} transparent animationType="fade" onRequestClose={() => { if (deletingTrainingId === null) setTrainingToDelete(null); }}>
+                <View style={styles.confirmOverlay}>
+                    <View style={styles.confirmCard}>
+                        <Text style={styles.confirmTitle}>Training verwijderen</Text>
+                        <Text style={styles.confirmDescription}>
+                            Weet je zeker dat je "{trainingToDelete?.title}" uit de agenda wilt verwijderen? De volledige training wordt verwijderd.
+                        </Text>
+                        {!!deleteError && <Text style={styles.confirmError}>{deleteError}</Text>}
+                        <View style={styles.confirmActions}>
+                            <Pressable style={styles.confirmCancel} onPress={() => setTrainingToDelete(null)} disabled={deletingTrainingId !== null}>
+                                <Text style={styles.confirmCancelText}>Annuleren</Text>
+                            </Pressable>
+                            <Pressable style={styles.confirmDelete} onPress={() => { if (trainingToDelete) void deleteTraining(trainingToDelete.id); }} disabled={deletingTrainingId !== null}>
+                                {deletingTrainingId !== null ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.confirmDeleteText}>Verwijderen</Text>}
+                            </Pressable>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
+    confirmOverlay: { flex: 1, justifyContent: "center", padding: SPACING.lg, backgroundColor: "rgba(0,0,0,0.7)" },
+    confirmCard: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: RADIUS.xl, padding: SPACING.lg },
+    confirmTitle: { color: COLORS.text, fontSize: 21, fontWeight: "900", marginBottom: SPACING.md },
+    confirmDescription: { color: COLORS.text, fontSize: 15, lineHeight: 23, marginBottom: SPACING.md },
+    confirmError: { color: "#E66B67", marginBottom: SPACING.md },
+    confirmActions: { flexDirection: "row", gap: SPACING.sm, justifyContent: "flex-end" },
+    confirmCancel: { borderColor: COLORS.border, borderWidth: 1, borderRadius: RADIUS.md, padding: SPACING.md, flex: 1, alignItems: "center" },
+    confirmCancelText: { color: COLORS.text, fontWeight: "700" },
+    confirmDelete: { backgroundColor: "#B83F3B", borderRadius: RADIUS.md, padding: SPACING.md, flex: 1, alignItems: "center" },
+    confirmDeleteText: { color: "#FFFFFF", fontWeight: "800" },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
     center: {
