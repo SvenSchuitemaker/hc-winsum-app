@@ -407,7 +407,7 @@ export default function TeamDetailsScreen() {
                         linkedTrainerList.map((trainer) => (
                             <View key={trainer.id} style={styles.linkedTrainerItem}>
                                 <Text style={styles.trainerName}>
-                                    {trainer.full_name || trainer.email || "Onbekende trainer"}
+                                    {trainer.full_name?.trim() || trainer.email || "Onbekende trainer"}
                                 </Text>
                                 <Text style={styles.trainerMeta}>
                                     {trainer.email || "-"} • {trainer.role || "-"}
@@ -452,7 +452,7 @@ export default function TeamDetailsScreen() {
                             const isLinked = linkedTrainerIds.includes(trainer.id);
                             const isSavingLink = savingUserId === trainer.id;
                             const isChangingRole = changingRoleUserId === trainer.id;
-                            const displayName = trainer.full_name || trainer.email || "Onbekende trainer";
+                            const displayName = trainer.full_name?.trim() || trainer.email || "Onbekende trainer";
 
                             return (
                                 <View key={trainer.id} style={styles.trainerItem}>

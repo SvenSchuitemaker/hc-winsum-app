@@ -276,7 +276,7 @@ export default function ProfileScreen() {
                 <View style={styles.infoBlock}>
                     <Text style={styles.label}>Naam</Text>
                     <Text style={styles.value}>
-                        {profile?.full_name || profile?.email || user.email || "-"}
+                        {profile?.full_name?.trim() || profile?.email || user.email || "-"}
                     </Text>
                 </View>
 

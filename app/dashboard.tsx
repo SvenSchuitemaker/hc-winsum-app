@@ -78,7 +78,7 @@ function formatDate(dateString: string | null) {
 
 function displayName(profile: ProfileRow | undefined) {
     if (!profile) return "Onbekende trainer";
-    return profile.full_name?.trim() || profile.email || "Trainer";
+    return profile.full_name?.trim() || profile.email || "Onbekende trainer";
 }
 
 function SectionTitle({ icon, title, subtitle }: { icon: any; title: string; subtitle?: string }) {
