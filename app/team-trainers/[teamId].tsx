@@ -92,6 +92,7 @@ export default function TeamTrainersScreen() {
                     .select("id, email, role, club_id, full_name, phone, specialty, age_groups, bio")
                     .eq("club_id", loadedTeam.club_id)
                     .eq("role", "trainer")
+                    .order("full_name", { ascending: true, nullsFirst: false })
                     .order("email", { ascending: true }),
                 supabase
                     .from("team_trainers")
@@ -242,9 +243,6 @@ export default function TeamTrainersScreen() {
                                     <Text style={styles.trainerName}>
                                         {trainer.full_name || trainer.email || "Naam niet ingevuld"}
                                     </Text>
-                                    {!!trainer.full_name && (
-                                        <Text style={styles.trainerEmail}>{trainer.email || "Zonder e-mail"}</Text>
-                                    )}
                                     <Text style={styles.trainerRole}>
                                         {trainer.specialty || "Geen specialisme ingevuld"}
                                     </Text>

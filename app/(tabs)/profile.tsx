@@ -274,6 +274,13 @@ export default function ProfileScreen() {
                 )}
 
                 <View style={styles.infoBlock}>
+                    <Text style={styles.label}>Naam</Text>
+                    <Text style={styles.value}>
+                        {profile?.full_name || profile?.email || user.email || "-"}
+                    </Text>
+                </View>
+
+                <View style={styles.infoBlock}>
                     <Text style={styles.label}>E-mail</Text>
                     <Text style={styles.value}>{profile?.email || user.email || "-"}</Text>
                 </View>
