@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -489,6 +489,22 @@ export default function DashboardScreen() {
                     <Text style={styles.heroText}>
                         In één overzicht zie je hoe actief de trainers en teams zijn en hoe de oefenbibliotheek is opgebouwd.
                     </Text>
+
+                    <Pressable
+                        style={styles.weekOverviewButton}
+                        onPress={() => router.push("/weekoverzicht")}
+                    >
+                        <View style={styles.weekOverviewIcon}>
+                            <Ionicons name="calendar-outline" size={22} color={COLORS.text} />
+                        </View>
+                        <View style={styles.weekOverviewTextWrap}>
+                            <Text style={styles.weekOverviewTitle}>Clubweekoverzicht</Text>
+                            <Text style={styles.weekOverviewText}>
+                                Bekijk per team de trainers en trainingen van deze week.
+                            </Text>
+                        </View>
+                        <Ionicons name="chevron-forward-outline" size={22} color={COLORS.primaryLight} />
+                    </Pressable>
                 </View>
 
                 <View style={styles.statsGrid}>
@@ -749,6 +765,40 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 22,
         maxWidth: 720,
+    },
+    weekOverviewButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 11,
+        marginTop: SPACING.md,
+        backgroundColor: COLORS.surfaceLight,
+        borderRadius: RADIUS.lg,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    weekOverviewIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 13,
+        backgroundColor: COLORS.primary,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    weekOverviewTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    weekOverviewTitle: {
+        color: COLORS.text,
+        fontSize: 15,
+        fontWeight: "900",
+        marginBottom: 3,
+    },
+    weekOverviewText: {
+        color: COLORS.mutedText,
+        fontSize: 12,
+        lineHeight: 17,
     },
     statsGrid: {
         flexDirection: "row",
