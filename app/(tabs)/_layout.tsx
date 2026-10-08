@@ -143,6 +143,14 @@ export default function TabsLayout() {
             />
 
             <Tabs.Screen
+                name="dashboard"
+                options={{
+                    title: "Dashboard",
+                    href: null,
+                }}
+            />
+
+            <Tabs.Screen
                 name="team-trainers"
                 options={{
                     href: null,
