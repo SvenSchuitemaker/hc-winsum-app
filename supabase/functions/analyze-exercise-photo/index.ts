@@ -294,22 +294,26 @@ function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unkno
     });
     return best;
   };
-  // Existing shirt objects win first, so we never steal their pixel centers
-  // when converting legacy attacker/defender/trainer circles.
-  for (const item of updated) {
-    if (item.type !== "player") continue;
-    const match = bestMatch(item, String(item.shirtColor ?? ""), 0.085);
-    if (match !== -1) {
-      item.x = candidates[match].x;
-      item.y = candidates[match].y;
-      used.add(match);
-    }
+  // Reserve pixel candidates for explicit, numbered shirts first. Do not let
+  // anonymous AI circles steal a shirt already assigned to a numbered player.
+  const players = updated.filter((item) => item.type === "player");
+  players.sort((a, b) => Number(Boolean(b.label)) - Number(Boolean(a.label)));
+  for (const item of players) {
+    const color = String(item.shirtColor ?? "");
+    const match = bestMatch(item, color, 0.065);
+    if (match === -1) continue;
+    item.x = candidates[match].x;
+    item.y = candidates[match].y;
+    used.add(match);
   }
+
+  // Convert only unmistakable matches; never reclassify an existing player
+  // or replace its number/color based on a distant similarly colored shape.
   for (const item of updated) {
     if (!["attacker", "defender", "trainer"].includes(String(item.type))) continue;
     const allowed = item.type === "trainer" ? ["grey"] :
-      item.type === "defender" ? ["black", "orange"] : ["blue", "orange", "black"];
-    let match = -1, distance = 0.075;
+      item.type === "defender" ? ["black"] : ["blue", "orange"];
+    let match = -1, distance = 0.045;
     candidates.forEach((candidate, index) => {
       if (used.has(index) || !allowed.includes(candidate.shirtColor)) return;
       const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
@@ -320,8 +324,7 @@ function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unkno
     const wasTrainer = item.type === "trainer";
     item.type = "player";
     item.shirtColor = source.shirtColor;
-    item.label = wasTrainer ? "T" :
-      typeof item.label === "string" ? item.label : "";
+    item.label = wasTrainer ? "T" : typeof item.label === "string" ? item.label : "";
     item.x = source.x;
     item.y = source.y;
     used.add(match);
