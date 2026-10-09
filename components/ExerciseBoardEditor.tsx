@@ -53,6 +53,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
         const captureTargetRef = useRef<View | null>(null);
 
         const [fieldMode] = useState<FieldMode>(initialLayoutRef.current.fieldMode);
+        const [fieldOrientation, setFieldOrientation] = useState<"top" | "right">(initialLayoutRef.current.fieldOrientation === "top" ? "top" : "right");
         const [items, setItems] = useState(initialLayoutRef.current.items);
         const [backgroundImageUrl, setBackgroundImageUrl] = useState(initialLayoutRef.current.backgroundImageUrl);
         const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
@@ -103,13 +104,14 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             const next = sanitizeLayout(value);
             setItems(next.items);
             setBackgroundImageUrl(next.backgroundImageUrl);
+            setFieldOrientation(next.fieldOrientation === "top" ? "top" : "right");
             setBackgroundOpacity(next.backgroundOpacity ?? 0.65);
             hydratedFromPropsRef.current = true;
         }, [value]);
 
         useEffect(() => {
-            onChange?.({ fieldMode, items, backgroundImageUrl, backgroundOpacity });
-        }, [fieldMode, items, backgroundImageUrl, backgroundOpacity, onChange]);
+            onChange?.({ fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity });
+        }, [fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity, onChange]);
 
         const itemLabels = useMemo(() => buildItemLabels(items), [items]);
 
@@ -417,6 +419,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         boardWidth={boardSize.width}
                         boardHeight={boardSize.height}
                         itemLabels={itemLabels}
+                        fieldOrientation={fieldOrientation}
                         backgroundImageUrl={backgroundImageUrl}
                         backgroundOpacity={backgroundOpacity}
                         showBackground={showBackground}

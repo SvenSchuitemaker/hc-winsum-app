@@ -522,7 +522,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       subtitle: safeText(parsed.subtitle).slice(0, 300),
       explanation: safeText(parsed.explanation),
       instructions: safeText(parsed.instructions),
-      board_layout: { fieldMode: "half", items: uniqueItems },
+      board_layout: { fieldMode: "half", fieldOrientation: "top", items: uniqueItems },
     });
   } catch {
     return json({ error: "Could not analyze this image." }, 500);

@@ -72,6 +72,7 @@ export type BoardItem = {
 
 export type ExerciseBoardLayout = {
     fieldMode: FieldMode;
+    fieldOrientation?: "right" | "top";
     items: BoardItem[];
     backgroundImageUrl?: string | null;
     backgroundOpacity?: number;
