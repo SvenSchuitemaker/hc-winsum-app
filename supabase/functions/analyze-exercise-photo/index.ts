@@ -284,50 +284,55 @@ function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unkno
     return [{ ...calibratedPoint(p.x, p.y, calibration), shirtColor: color }];
   });
   const updated = items.map((item) => ({ ...item }));
-  const used = new Set<number>();
-  const bestMatch = (item: Record<string, unknown>, color: string, radius: number) => {
-    let best = -1, distance = radius;
-    candidates.forEach((candidate, index) => {
-      if (used.has(index) || candidate.shirtColor !== color) return;
-      const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
-      if (d < distance) { distance = d; best = index; }
-    });
-    return best;
+  // Only accept a mutual nearest-neighbour match. Earlier greedy matching could
+  // move player #1 onto shirt #3's pixels and shift the rest of a formation.
+  // A pixel component near a line, jersey number or cone is not automatically
+  // a reliable player detection.
+  const claim = (item: Record<string, unknown>, allowed: string[], radius: number) => {
+    const matching = candidates.map((candidate, index) => ({
+      candidate, index,
+      distance: Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y),
+    })).filter(({ candidate, distance }) => allowed.includes(candidate.shirtColor) && distance <= radius)
+      .sort((a, b) => a.distance - b.distance);
+    if (!matching.length) return null;
+    // Avoid ambiguous pixel candidates sitting between two nearby players.
+    if (matching.length > 1 && matching[1].distance - matching[0].distance < 0.025) return null;
+    const closest = matching[0];
+    const competing = updated.filter((other) =>
+      other !== item && other.type === "player" &&
+      other.shirtColor === closest.candidate.shirtColor &&
+      Math.hypot(Number(other.x) - closest.candidate.x,
+        Number(other.y) - closest.candidate.y) <= closest.distance + 0.012);
+    if (competing.length) return null;
+    return closest;
   };
-  // Reserve pixel candidates for explicit, numbered shirts first. Do not let
-  // anonymous AI circles steal a shirt already assigned to a numbered player.
+  const used = new Set<number>();
+  // Preserve the label and color on every numbered jersey. Only refine a
+  // confidently matched center, not the identities or ordering.
   const players = updated.filter((item) => item.type === "player");
-  players.sort((a, b) => Number(Boolean(b.label)) - Number(Boolean(a.label)));
   for (const item of players) {
     const color = String(item.shirtColor ?? "");
-    const match = bestMatch(item, color, 0.065);
-    if (match === -1) continue;
-    item.x = candidates[match].x;
-    item.y = candidates[match].y;
-    used.add(match);
+    const match = claim(item, [color], 0.035);
+    if (!match || used.has(match.index)) continue;
+    item.x = match.candidate.x;
+    item.y = match.candidate.y;
+    used.add(match.index);
   }
-
-  // Convert only unmistakable matches; never reclassify an existing player
-  // or replace its number/color based on a distant similarly colored shape.
+  // Legacy circle conversion remains possible, but never at the cost of
+  // inventing jersey numbers or moving a previously recognized player.
   for (const item of updated) {
     if (!["attacker", "defender", "trainer"].includes(String(item.type))) continue;
     const allowed = item.type === "trainer" ? ["grey"] :
       item.type === "defender" ? ["black"] : ["blue", "orange"];
-    let match = -1, distance = 0.045;
-    candidates.forEach((candidate, index) => {
-      if (used.has(index) || !allowed.includes(candidate.shirtColor)) return;
-      const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
-      if (d < distance) { distance = d; match = index; }
-    });
-    if (match === -1) continue;
-    const source = candidates[match];
+    const match = claim(item, allowed, 0.025);
+    if (!match || used.has(match.index)) continue;
     const wasTrainer = item.type === "trainer";
     item.type = "player";
-    item.shirtColor = source.shirtColor;
+    item.shirtColor = match.candidate.shirtColor;
     item.label = wasTrainer ? "T" : typeof item.label === "string" ? item.label : "";
-    item.x = source.x;
-    item.y = source.y;
-    used.add(match);
+    item.x = match.candidate.x;
+    item.y = match.candidate.y;
+    used.add(match.index);
   }
   return updated;
 }
