@@ -236,7 +236,12 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const calibration = parseCalibration(parsed.calibration);
     // The initial pass finds jerseys/cones/text and calibrates the field. Trace arrows
     // separately to avoid a common failure mode where players are connected arbitrarily.
-    const arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
+    let arrowItems: unknown[] = [];
+    try {
+      arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
+    } catch {
+      // A transient second-pass failure must not discard a successful first pass.
+    }
     const visualItems = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type))) : [];
     const fallbackArrows = Array.isArray(parsed.items)
