@@ -380,15 +380,6 @@ function anchorPixelPlayers(
   const updated = items.map((item) => ({ ...item }));
   const players = updated.filter((item) => item.type === "player");
   const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-  // A dark/black jersey may be classified grey by either detector. This is
-  // the same playing team, but T is still a distinct grey trainer.
-  const compatibleColors = (player: Record<string, unknown>, detected: string) => {
-    const color = String(player.shirtColor ?? "");
-    if (color === detected) return true;
-    if (String(player.label ?? "").trim().toUpperCase() === "T") return false;
-    return (color === "black" || color === "grey") &&
-      (detected === "black" || detected === "grey");
-  };
   // Audit-derived labels are only evidence for an EXISTING jersey identity.
   // They must not create, renumber or reposition a player on their own.
   const audited = (Array.isArray(jerseyAudit) ? jerseyAudit : []).flatMap((raw) => {
@@ -408,12 +399,12 @@ function anchorPixelPlayers(
     const label = String(player.label ?? "").trim().toUpperCase();
     if (!label) return false;
     const identity = audited.filter((a) =>
-      compatibleColors(player, a.shirtColor) && a.label === label);
+      a.shirtColor === player.shirtColor && a.label === label);
     if (identity.length !== 1 || distance(identity[0], candidate) > 0.028) return false;
     // OCR must also agree with the ORIGINAL player position. This avoids
     // using a mistakenly read number to swap two similarly colored jerseys.
     if (distance(identity[0], { x: Number(player.x), y: Number(player.y) }) > 0.075) return false;
-    return audited.filter((a) => compatibleColors(player, a.shirtColor) &&
+    return audited.filter((a) => a.shirtColor === player.shirtColor &&
       distance(a, candidate) <= 0.028).length === 1;
   };
   const used = new Set<number>();
@@ -423,13 +414,13 @@ function anchorPixelPlayers(
     const origin = { x: Number(item.x), y: Number(item.y) };
     const matching = candidates.map((candidate, index) => ({
       candidate, index, distance: distance(origin, candidate),
-    })).filter(({ candidate, distance: d }) => allowed.some((color) => color === candidate.shirtColor || (item.type === "player" && compatibleColors({ ...item, shirtColor: color }, candidate.shirtColor))) && d <= radius)
+    })).filter(({ candidate, distance: d }) => allowed.includes(candidate.shirtColor) && d <= radius)
       .sort((a, b) => a.distance - b.distance);
     if (!matching.length || used.has(matching[0].index)) return null;
     if (matching.length > 1 && matching[1].distance - matching[0].distance < 0.025) return null;
     const closest = matching[0];
     const rivals = players.filter((other) => other !== item &&
-      compatibleColors(other, closest.candidate.shirtColor))
+      other.shirtColor === closest.candidate.shirtColor)
       .map((other) => distance({ x: Number(other.x), y: Number(other.y) }, closest.candidate));
     if (rivals.some((d) => d <= closest.distance + 0.015)) return null;
     // A pixel component alone is not sufficient evidence for a large move.
@@ -439,7 +430,7 @@ function anchorPixelPlayers(
   // Assign more certain, shorter matches first, independent of source order.
   const ordered = players.map((player) => ({
     player,
-    closest: candidates.filter((c) => compatibleColors(player, c.shirtColor))
+    closest: candidates.filter((c) => c.shirtColor === player.shirtColor)
       .reduce((best, c) => Math.min(best,
         distance({ x: Number(player.x), y: Number(player.y) }, c)), Infinity),
   })).sort((a, b) => a.closest - b.closest);
