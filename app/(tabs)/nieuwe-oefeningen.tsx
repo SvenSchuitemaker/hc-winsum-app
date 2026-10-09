@@ -113,6 +113,9 @@ export default function NieuweOefeningenScreen() {
             const selected = await selectExercisePhoto();
             if (!selected) return;
             setImportPhoto(selected);
+            // A new photo must not reuse objects recognized from a previous photo.
+            setBoardLayout(createEmptyBoardLayout());
+            setBoardVersion((version) => version + 1);
         } catch (error) {
             setImportError(error instanceof Error ? error.message : "Afbeelding selecteren mislukt.");
         }
@@ -187,7 +190,10 @@ export default function NieuweOefeningenScreen() {
                 throw new Error("Supabase is niet geladen.");
             }
 
-            const hasBoardItems = importMode === "ai" && boardLayout.items.length > 0 || !importPhoto && boardLayout.items.length > 0;
+            if (importPhoto && importMode === "ai" && boardLayout.items.length === 0) {
+                throw new Error("Laat de foto eerst met AI analyseren of kies 'Originele foto'.");
+            }
+            const hasBoardItems = boardLayout.items.length > 0 && (!importPhoto || importMode === "ai");
             let savedImageUrl = imageUrl.trim() || null;
             if (importPhoto && importMode === "photo") {
                 if (!user?.id) throw new Error("Log in om een foto toe te voegen.");
@@ -314,7 +320,7 @@ export default function NieuweOefeningenScreen() {
                         </Pressable>
                     )}
                     {!!importError && <Text style={styles.importError}>{importError}</Text>}
-                    {importMode === "ai" && <Text style={styles.helpText}>Controleer en corrigeer de automatisch herkende onderdelen in de editor hieronder voordat je opslaat.</Text>}
+                    {importMode === "ai" && <Text style={styles.helpText}>Als je analyseert, wordt de foto naar onze beveiligde Supabase-functie en een AI-dienst verzonden. Dit kan API-kosten veroorzaken. Controleer en corrigeer de onderdelen hieronder voordat je opslaat.</Text>}
                 </View>
 
                 <Text style={styles.label}>Afbeelding URL (optioneel)</Text>
