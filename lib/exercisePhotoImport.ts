@@ -1,6 +1,7 @@
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "./supabase";
+import { detectRedCones } from "./exercisePixelDetection";
 import type { ExerciseBoardLayout } from "../components/exercise-board/boardTypes";
 
 const SUPPORTED = ["image/jpeg", "image/png", "image/webp"];
@@ -56,8 +57,9 @@ export async function uploadExercisePhoto(photo: SelectedExercisePhoto, userId: 
 
 export async function analyzeExercisePhoto(photo: SelectedExercisePhoto): Promise<ExercisePhotoAnalysis> {
     if (!supabase) throw new Error("Supabase is niet geladen.");
+    const detectedCones = await detectRedCones(photo);
     const { data, error } = await supabase.functions.invoke("analyze-exercise-photo", {
-        body: { mimeType: photo.mimeType, base64: photo.base64 },
+        body: { mimeType: photo.mimeType, base64: photo.base64, detectedCones },
     });
     if (error) {
         let message = "AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed en OPENAI_API_KEY is ingesteld.";
