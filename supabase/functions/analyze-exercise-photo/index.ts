@@ -51,7 +51,13 @@ Deno.serve(async (request) => {
     const url = Deno.env.get("SUPABASE_URL");
     const anon = Deno.env.get("SUPABASE_ANON_KEY");
     const key = Deno.env.get("OPENAI_API_KEY");
-    if (!url || !anon || !key) return json({ error: "AI import is not configured." }, 503);
+    // Report missing variable *names* only; never expose secret values.
+    const missing = [
+      !url ? "SUPABASE_URL" : null,
+      !anon ? "SUPABASE_ANON_KEY" : null,
+      !key ? "OPENAI_API_KEY" : null,
+    ].filter(Boolean);
+    if (missing.length) return json({ error: `AI-import is niet geconfigureerd. Ontbrekende Supabase-instelling(en): ${missing.join(", ")}.` }, 503);
     const supabase = createClient(url, anon, { global: { headers: { Authorization: `Bearer ${token}` } } });
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return json({ error: "Authentication failed." }, 401);
