@@ -270,6 +270,57 @@ function applyDiagramConstraints(items: Array<Record<string, unknown>>) {
   return result;
 }
 
+
+function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unknown, calibration: FieldCalibration) {
+  if (!Array.isArray(pixels) || pixels.length > 80) return items;
+  const candidates = pixels.flatMap((p: unknown) => {
+    if (!p || typeof p !== "object") return [];
+    const candidate = p as Record<string, unknown>;
+    const color = String(candidate.shirtColor);
+    const x = candidate.x, y = candidate.y;
+    if (!["black", "orange", "blue", "grey"].includes(color) ||
+        typeof x !== "number" || typeof y !== "number" ||
+        !Number.isFinite(x) || !Number.isFinite(y) ||
+        x < 0 || x > 1 || y < 0 || y > 1) return [];
+    return [{ ...calibratedPoint(x, y, calibration), shirtColor: color }];
+  });
+  const updated = items.map((item) => ({ ...item }));
+  const used = new Set<number>();
+  for (const item of updated) {
+    if (item.type !== "player") continue;
+    const color = String(item.shirtColor ?? "");
+    let best = -1, distance = 0.085;
+    candidates.forEach((candidate, index) => {
+      if (used.has(index) || candidate.shirtColor !== color) return;
+      const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
+      if (d < distance) { distance = d; best = index; }
+    });
+    if (best !== -1) {
+      item.x = candidates[best].x;
+      item.y = candidates[best].y;
+      used.add(best);
+    }
+  }
+  return updated;
+}
+
+function anchorSupportLabels(items: Array<Record<string, unknown>>) {
+  const blues = items.filter((item) => item.type === "player" && item.shirtColor === "blue");
+  const used = new Set<string>();
+  return items.flatMap((item) => {
+    if (item.type !== "text" || String(item.text).trim().toLowerCase() !== "steunspeler") return [item];
+    const match = blues.map((player) => ({
+      player,
+      distance: Math.hypot(Number(player.x) - Number(item.x), Number(player.y) - Number(item.y)),
+    })).sort((a, b) => a.distance - b.distance).find(({ player }) => !used.has(String(player.id)));
+    if (!match || match.distance > 0.17) return [];
+    used.add(String(match.player.id));
+    const x = Math.max(0.08, Math.min(0.92, Number(match.player.x)));
+    const y = Math.max(0.04, Math.min(0.96, Number(match.player.y) + 0.045));
+    return [{ ...item, x, y }];
+  });
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -382,7 +433,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = applyDiagramConstraints(deduplicateDetections(normalized));
+    const uniqueItems = anchorSupportLabels(applyDiagramConstraints(deduplicateDetections(
+      anchorPixelPlayers(normalized, body?.detectedPlayers, calibration),
+    )));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
