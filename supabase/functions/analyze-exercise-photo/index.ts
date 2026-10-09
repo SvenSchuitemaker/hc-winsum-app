@@ -273,33 +273,58 @@ function applyDiagramConstraints(items: Array<Record<string, unknown>>) {
 
 function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unknown, calibration: FieldCalibration) {
   if (!Array.isArray(pixels) || pixels.length > 80) return items;
-  const candidates = pixels.flatMap((p: unknown) => {
-    if (!p || typeof p !== "object") return [];
-    const candidate = p as Record<string, unknown>;
-    const color = String(candidate.shirtColor);
-    const x = candidate.x, y = candidate.y;
+  const candidates = pixels.flatMap((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return [];
+    const p = raw as Record<string, unknown>;
+    const color = String(p.shirtColor);
     if (!["black", "orange", "blue", "grey"].includes(color) ||
-        typeof x !== "number" || typeof y !== "number" ||
-        !Number.isFinite(x) || !Number.isFinite(y) ||
-        x < 0 || x > 1 || y < 0 || y > 1) return [];
-    return [{ ...calibratedPoint(x, y, calibration), shirtColor: color }];
+        typeof p.x !== "number" || typeof p.y !== "number" ||
+        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+    return [{ ...calibratedPoint(p.x, p.y, calibration), shirtColor: color }];
   });
   const updated = items.map((item) => ({ ...item }));
   const used = new Set<number>();
-  for (const item of updated) {
-    if (item.type !== "player") continue;
-    const color = String(item.shirtColor ?? "");
-    let best = -1, distance = 0.085;
+  const bestMatch = (item: Record<string, unknown>, color: string, radius: number) => {
+    let best = -1, distance = radius;
     candidates.forEach((candidate, index) => {
       if (used.has(index) || candidate.shirtColor !== color) return;
       const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
       if (d < distance) { distance = d; best = index; }
     });
-    if (best !== -1) {
-      item.x = candidates[best].x;
-      item.y = candidates[best].y;
-      used.add(best);
+    return best;
+  };
+  // Existing shirt objects win first, so we never steal their pixel centers
+  // when converting legacy attacker/defender/trainer circles.
+  for (const item of updated) {
+    if (item.type !== "player") continue;
+    const match = bestMatch(item, String(item.shirtColor ?? ""), 0.085);
+    if (match !== -1) {
+      item.x = candidates[match].x;
+      item.y = candidates[match].y;
+      used.add(match);
     }
+  }
+  for (const item of updated) {
+    if (!["attacker", "defender", "trainer"].includes(String(item.type))) continue;
+    const allowed = item.type === "trainer" ? ["grey"] :
+      item.type === "defender" ? ["black", "orange"] : ["blue", "orange", "black"];
+    let match = -1, distance = 0.075;
+    candidates.forEach((candidate, index) => {
+      if (used.has(index) || !allowed.includes(candidate.shirtColor)) return;
+      const d = Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y);
+      if (d < distance) { distance = d; match = index; }
+    });
+    if (match === -1) continue;
+    const source = candidates[match];
+    const wasTrainer = item.type === "trainer";
+    item.type = "player";
+    item.shirtColor = source.shirtColor;
+    item.label = wasTrainer ? "T" :
+      typeof item.label === "string" ? item.label : "";
+    item.x = source.x;
+    item.y = source.y;
+    used.add(match);
   }
   return updated;
 }
