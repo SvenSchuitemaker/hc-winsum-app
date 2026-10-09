@@ -334,18 +334,46 @@ function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unkno
 
 function anchorSupportLabels(items: Array<Record<string, unknown>>) {
   const blues = items.filter((item) => item.type === "player" && item.shirtColor === "blue");
-  const used = new Set<string>();
+  const labels = items.filter((item) => item.type === "text" && String(item.text).trim().toLowerCase() === "steunspeler");
+  if (!blues.length || !labels.length) return items;
+  const assignments = new Map<Record<string, unknown>, Record<string, unknown>>();
+  const usedLabels = new Set<Record<string, unknown>>();
+  // Anchor each visible support player to at most one source label. Start with
+  // the closest label so one annotation never gets reused for both players.
+  const pairs = blues.flatMap((player) => labels.map((label) => ({
+    player, label,
+    distance: Math.hypot(Number(player.x) - Number(label.x), Number(player.y) - Number(label.y)),
+  }))).sort((a, b) => a.distance - b.distance);
+  for (const { player, label, distance } of pairs) {
+    if (distance > 0.17 || assignments.has(player) || usedLabels.has(label)) continue;
+    assignments.set(player, label);
+    usedLabels.add(label);
+  }
+  const assigned = new Map(Array.from(assignments.entries()).map(([player, label]) => [label, player]));
   return items.flatMap((item) => {
     if (item.type !== "text" || String(item.text).trim().toLowerCase() !== "steunspeler") return [item];
-    const match = blues.map((player) => ({
-      player,
-      distance: Math.hypot(Number(player.x) - Number(item.x), Number(player.y) - Number(item.y)),
-    })).sort((a, b) => a.distance - b.distance).find(({ player }) => !used.has(String(player.id)));
-    if (!match || match.distance > 0.17) return [];
-    used.add(String(match.player.id));
-    const x = Math.max(0.08, Math.min(0.92, Number(match.player.x)));
-    const y = Math.max(0.04, Math.min(0.96, Number(match.player.y) + 0.045));
-    return [{ ...item, x, y }];
+    const player = assigned.get(item);
+    if (!player) return [];
+    // Keep the caption under the player without moving the player itself.
+    return [{ ...item, x: Math.max(0.1, Math.min(0.9, Number(player.x))),
+      y: Math.max(0.05, Math.min(0.94, Number(player.y) + 0.055)) }];
+  });
+}
+
+function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
+  const players = items.filter((item) => item.type === "player" || item.type === "trainer" ||
+    item.type === "attacker" || item.type === "defender");
+  // Leave images without recognizable players unchanged.
+  if (players.length < 2) return items;
+  const nearPlayer = (x: number, y: number) => players.some((player) =>
+    Math.hypot(Number(player.x) - x, Number(player.y) - y) < 0.105);
+  return items.filter((item) => {
+    if (!lineTypes.has(String(item.type))) return true;
+    const x = Number(item.x), y = Number(item.y), x2 = Number(item.x2), y2 = Number(item.y2);
+    if (![x, y, x2, y2].every(Number.isFinite)) return false;
+    // The arrows in hockey drills run between player locations. Reject
+    // speculative lines floating across field markings or the shooting circle.
+    return nearPlayer(x, y) && nearPlayer(x2, y2);
   });
 }
 
@@ -461,9 +489,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = anchorSupportLabels(applyDiagramConstraints(deduplicateDetections(
+    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(applyDiagramConstraints(deduplicateDetections(
       anchorPixelPlayers(normalized, body?.detectedPlayers, calibration),
-    )));
+    ))));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
