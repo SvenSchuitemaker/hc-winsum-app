@@ -196,8 +196,9 @@ export default function NieuweOefeningenScreen() {
             }
             const hasBoardItems = boardLayout.items.length > 0 && (!importPhoto || importMode === "ai");
             let savedImageUrl = imageUrl.trim() || null;
-            if (importPhoto && importMode === "photo") {
+            if (importPhoto) {
                 if (!user?.id) throw new Error("Log in om een foto toe te voegen.");
+                // Keep the uploaded original as fallback if a generated board preview fails.
                 savedImageUrl = await uploadExercisePhoto(importPhoto, user.id);
             }
 
@@ -221,23 +222,31 @@ export default function NieuweOefeningenScreen() {
 
             if (insertError) throw insertError;
 
+            let previewFailed = false;
             if (hasBoardItems && insertedExercise?.id && boardPreviewRef.current) {
-                const previewUrl = await uploadExerciseBoardPreview({
-                    exerciseId: insertedExercise.id,
-                    title: title.trim(),
-                    boardRef: boardPreviewRef.current,
-                });
+                try {
+                    const previewUrl = await uploadExerciseBoardPreview({
+                        exerciseId: insertedExercise.id,
+                        title: title.trim(),
+                        boardRef: boardPreviewRef.current,
+                    });
 
-                const { error: updateError } = await supabase
-                    .from("exercises")
-                    .update({ image_url: previewUrl })
-                    .eq("id", insertedExercise.id);
+                    const { error: updateError } = await supabase
+                        .from("exercises")
+                        .update({ image_url: previewUrl })
+                        .eq("id", insertedExercise.id);
 
-                if (updateError) throw updateError;
+                    if (updateError) throw updateError;
+                } catch {
+                    // The exercise already exists: keep its original photo, when available.
+                    previewFailed = true;
+                }
             }
 
             resetForm();
-            setFormSuccess("De oefening is toegevoegd aan de bibliotheek.");
+            setFormSuccess(previewFailed
+                ? "Oefening opgeslagen, maar de bordpreview kon niet worden gemaakt. Open de oefening om de afbeelding te controleren."
+                : "De oefening is toegevoegd aan de bibliotheek.");
         } catch (error) {
             setFormError(error instanceof Error ? error.message : "Opslaan mislukt.");
         } finally {
