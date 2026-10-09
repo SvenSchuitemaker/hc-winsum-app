@@ -83,5 +83,21 @@ export async function analyzeExercisePhoto(photo: SelectedExercisePhoto): Promis
     if (!data.board_layout || !Array.isArray(data.board_layout.items)) {
         throw new Error("AI heeft geen geldig bewerkbaar bord teruggegeven.");
     }
-    return data as ExercisePhotoAnalysis;
+    // Normalize the imported board itself, not just its appearance. This
+    // keeps grey playing jerseys black even if the deployed Edge Function
+    // is an older version; trainer T and other colors remain unchanged.
+    const analysis = data as ExercisePhotoAnalysis;
+    return {
+        ...analysis,
+        board_layout: {
+            ...analysis.board_layout,
+            items: analysis.board_layout.items.map((item) =>
+                item.type === "player" &&
+                item.shirtColor === "grey" &&
+                String(item.label ?? "").trim().toUpperCase() !== "T"
+                    ? { ...item, shirtColor: "black" as const }
+                    : item
+            ),
+        },
+    };
 }
