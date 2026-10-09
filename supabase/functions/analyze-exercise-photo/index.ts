@@ -108,6 +108,51 @@ function normalizedItems(items: unknown, calibration: FieldCalibration) {
   });
 }
 
+// A second, focused vision pass avoids confusing exercise arrows with field markings.
+async function analyzeArrows(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. type=guideLine, strokeColor=#111111, dashed=false, arrowHead=true, lineStyle=straight unless the visible arrow is actually curved. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "user", content: [
+          { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ] },
+      ],
+    }),
+  });
+  if (!response.ok) return [];
+  const result = await response.json();
+  try {
+    const content = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(content.items) ? content.items : [];
+  } catch { return []; }
+}
+
+function deduplicateDetections(items: Array<Record<string, unknown>>) {
+  const seen: Array<Record<string, unknown>> = [];
+  for (const item of items) {
+    const x = Number(item.x), y = Number(item.y);
+    const line = lineTypes.has(String(item.type));
+    if (seen.some((previous) => {
+      if (line !== lineTypes.has(String(previous.type))) return false;
+      if (line) {
+        return Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.025
+          && Math.hypot(Number(item.x2) - Number(previous.x2), Number(item.y2) - Number(previous.y2)) < 0.025;
+      }
+      return item.type === previous.type && item.label === previous.label
+        && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.018;
+    })) continue;
+    seen.push(item);
+  }
+  return seen;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -137,12 +182,13 @@ Deno.serve(async (request) => {
       return json({ error: "Choose a JPEG, PNG or WebP image smaller than 5 MB." }, 400);
     }
 
+    const visionModel = Deno.env.get("OPENAI_EXERCISE_VISION_MODEL") || "gpt-4o";
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         // Use a full vision-capable model for pixel-position analysis; configurable for budgets.
-        model: Deno.env.get("OPENAI_EXERCISE_VISION_MODEL") || "gpt-4o",
+        model: visionModel,
         temperature: 0.1,
         response_format: { type: "json_object" },
         messages: [
@@ -188,13 +234,27 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const result = await response.json();
     const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
     const calibration = parseCalibration(parsed.calibration);
+    // The initial pass finds jerseys/cones/text and calibrates the field. Trace arrows
+    // separately to avoid a common failure mode where players are connected arbitrarily.
+    let arrowItems: unknown[] = [];
+    try {
+      arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
+    } catch {
+      // A transient second-pass failure must not discard a successful first pass.
+    }
+    const visualItems = Array.isArray(parsed.items)
+      ? parsed.items.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type))) : [];
+    const fallbackArrows = Array.isArray(parsed.items)
+      ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
+    const normalized = normalizedItems([...visualItems, ...(arrowItems.length ? arrowItems : fallbackArrows)], calibration);
+    const uniqueItems = deduplicateDetections(normalized);
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
       subtitle: safeText(parsed.subtitle).slice(0, 300),
       explanation: safeText(parsed.explanation),
       instructions: safeText(parsed.instructions),
-      board_layout: { fieldMode: "half", items: normalizedItems(parsed.items, calibration) },
+      board_layout: { fieldMode: "half", items: uniqueItems },
     });
   } catch {
     return json({ error: "Could not analyze this image." }, 500);
