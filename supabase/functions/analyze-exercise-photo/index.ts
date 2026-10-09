@@ -215,6 +215,8 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
 }
 
 function deduplicateDetections(items: Array<Record<string, unknown>>) {
+  // Treat adjacent detections of the same shirt as distinct when they have
+  // different printed numbers; remove only near-identical duplicates.
   const seen: Array<Record<string, unknown>> = [];
   for (const item of items) {
     const x = Number(item.x), y = Number(item.y);
@@ -222,15 +224,50 @@ function deduplicateDetections(items: Array<Record<string, unknown>>) {
     if (seen.some((previous) => {
       if (line !== lineTypes.has(String(previous.type))) return false;
       if (line) {
-        return Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.025
-          && Math.hypot(Number(item.x2) - Number(previous.x2), Number(item.y2) - Number(previous.y2)) < 0.025;
+        return Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.018
+          && Math.hypot(Number(item.x2) - Number(previous.x2), Number(item.y2) - Number(previous.y2)) < 0.018;
+      }
+      if (item.type === "text" && previous.type === "text") {
+        return String(item.text).trim().toLowerCase() === String(previous.text).trim().toLowerCase()
+          && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.075;
       }
       return item.type === previous.type && item.label === previous.label
+        && item.shirtColor === previous.shirtColor
         && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.018;
     })) continue;
     seen.push(item);
   }
   return seen;
+}
+
+// Maintain source-image spatial relationships: only apply narrowly justified
+// constraints. In particular, do not force free-form formations into rows.
+function applyDiagramConstraints(items: Array<Record<string, unknown>>) {
+  const players = items.filter((item) => item.type === "player" || item.type === "trainer");
+  const result: Array<Record<string, unknown>> = [];
+  for (const item of items) {
+    if (item.type === "text") {
+      // Labels such as "Steunspeler" should remain beside a visible support
+      // player, rather than be placed over the middle of the attacking circle.
+      const label = String(item.text ?? "").trim().toLowerCase();
+      if (label === "steunspeler" && players.length) {
+        const nearest = players
+          .filter((player) => player.type === "player" && (player.shirtColor === "blue" || player.shirtColor === "white"))
+          .map((player) => ({ player, distance: Math.hypot(Number(player.x) - Number(item.x), Number(player.y) - Number(item.y)) }))
+          .sort((a, b) => a.distance - b.distance)[0];
+        if (nearest && nearest.distance > 0.18) continue;
+      }
+    }
+    if (lineTypes.has(String(item.type))) {
+      const x = Number(item.x), y = Number(item.y);
+      const x2 = Number(item.x2), y2 = Number(item.y2);
+      // Very short strokes are commonly shirt details or field decorations,
+      // not intentional pass/movement arrows.
+      if (Math.hypot(x2 - x, y2 - y) < 0.035) continue;
+    }
+    result.push(item);
+  }
+  return result;
 }
 
 Deno.serve(async (request) => {
@@ -327,7 +364,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const fallbackArrows = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
     const normalized = normalizedItems([...visualItems, ...(arrowItems.length ? arrowItems : fallbackArrows)], calibration);
-    const uniqueItems = deduplicateDetections(normalized);
+    const uniqueItems = applyDiagramConstraints(deduplicateDetections(normalized));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
