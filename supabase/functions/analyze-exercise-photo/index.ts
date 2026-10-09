@@ -24,6 +24,7 @@ type FieldCalibration = {
   rotation: 0 | 90 | 180 | 270;
   flipHorizontal: boolean;
   goalEdge?: "top" | "right" | "bottom" | "left" | "unknown";
+  corners?: { tl: Point; tr: Point; br: Point; bl: Point };
 };
 
 // Coordinates returned by the vision model are in the full source image.
@@ -51,13 +52,65 @@ function parseCalibration(raw: unknown): FieldCalibration {
   const rotation = goalEdge && goalEdge !== "unknown"
     ? rotationByGoalEdge[goalEdge]
     : 0; // Do not trust arbitrary model rotations without a visible goal edge.
-  return { bounds: { left, top, right, bottom }, rotation, flipHorizontal: obj.flipHorizontal === true && goalEdge !== "unknown", goalEdge };
+  // Optional perspective correction when all four visible field corners are known.
+  // Keep the axis-aligned bounds fallback if corners are missing or implausible.
+  const rawCorners = obj.corners as Record<string, unknown> | undefined;
+  let corners: FieldCalibration["corners"];
+  if (rawCorners && typeof rawCorners === "object") {
+    const getPoint = (key: string): Point | null => {
+      const raw = rawCorners[key];
+      if (!raw || typeof raw !== "object") return null;
+      const point = raw as Record<string, unknown>;
+      const x = Number(point.x), y = Number(point.y);
+      return Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
+    };
+    const tl = getPoint("tl"), tr = getPoint("tr"), br = getPoint("br"), bl = getPoint("bl");
+    if (tl && tr && br && bl) {
+      const area = Math.abs(
+        tl.x * tr.y - tr.x * tl.y + tr.x * br.y - br.x * tr.y +
+        br.x * bl.y - bl.x * br.y + bl.x * tl.y - tl.x * bl.y
+      ) / 2;
+      const edge = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+      if (area > 0.025 && edge(tl, tr) > 0.15 && edge(bl, br) > 0.15 &&
+          edge(tl, bl) > 0.15 && edge(tr, br) > 0.15) {
+        corners = { tl, tr, br, bl };
+      }
+    }
+  }
+  return { bounds: { left, top, right, bottom }, rotation, flipHorizontal: obj.flipHorizontal === true && goalEdge !== "unknown", goalEdge, corners };
+}
+
+// Invert the bilinear map through four detected source-image field corners.
+// Unlike a simple bounding box, this compensates for mild perspective/skew.
+function inverseFieldQuad(point: Point, corners: NonNullable<FieldCalibration["corners"]>): Point | null {
+  const { tl, tr, br, bl } = corners;
+  const ax = tr.x - tl.x, ay = tr.y - tl.y;
+  const bx = bl.x - tl.x, by = bl.y - tl.y;
+  const cx = tl.x - tr.x + br.x - bl.x;
+  const cy = tl.y - tr.y + br.y - bl.y;
+  let u = 0.5, v = 0.5;
+  for (let iteration = 0; iteration < 12; iteration++) {
+    const fx = tl.x + ax * u + bx * v + cx * u * v - point.x;
+    const fy = tl.y + ay * u + by * v + cy * u * v - point.y;
+    const j11 = ax + cx * v, j12 = bx + cx * u;
+    const j21 = ay + cy * v, j22 = by + cy * u;
+    const determinant = j11 * j22 - j12 * j21;
+    if (Math.abs(determinant) < 1e-7) return null;
+    const du = (fx * j22 - fy * j12) / determinant;
+    const dv = (j11 * fy - j21 * fx) / determinant;
+    u -= du;
+    v -= dv;
+    if (!Number.isFinite(u) || !Number.isFinite(v) || Math.abs(u) > 5 || Math.abs(v) > 5) return null;
+    if (Math.abs(du) + Math.abs(dv) < 1e-7) break;
+  }
+  return { x: u, y: v };
 }
 
 function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
   const { left, right, top, bottom } = calibration.bounds;
-  const u = (x - left) / (right - left);
-  const v = (y - top) / (bottom - top);
+  const corrected = calibration.corners ? inverseFieldQuad({ x, y }, calibration.corners) : null;
+  const u = corrected?.x ?? (x - left) / (right - left);
+  const v = corrected?.y ?? (y - top) / (bottom - top);
   let transformed: Point;
   switch (calibration.rotation) {
     case 90: transformed = { x: 1 - v, y: u }; break;
@@ -194,7 +247,7 @@ Deno.serve(async (request) => {
         messages: [
           { role: "system", content: `You are an accurate field hockey exercise diagram TRACER, not a diagram designer. Return one JSON object: title, subtitle, explanation, instructions, calibration, items.
 
-GEOMETRY FIRST: calibration={bounds:{left,top,right,bottom},goalEdge,rotation,flipHorizontal}. All numbers are fractions of the FULL uploaded image [0,1]. Find the top, right, bottom, left borders of the actual rectangular green field (not the outer white canvas or UI). Only crop to clearly visible boundaries; otherwise bounds={left:0,top:0,right:1,bottom:1}. goalEdge must be top/right/bottom/left ONLY when an actual rectangular goal and/or solid shooting circle visibly indicates the attacking end; otherwise unknown. In particular, if the goal is physically at the TOP of the image, goalEdge MUST be "top" even when the picture is taller than wide. rotation is informational; the server computes rotation from goalEdge. Do not mirror by default: flipHorizontal=false except when unmistakably necessary.
+GEOMETRY FIRST: calibration={bounds:{left,top,right,bottom},goalEdge,rotation,flipHorizontal,corners?}. corners is OPTIONAL and must be {tl:{x,y},tr:{x,y},br:{x,y},bl:{x,y}} in full ORIGINAL image coordinates, where tl/tr/br/bl are the four corners of the same visible hockey field rectangle in image orientation. Return corners ONLY when all four edges/corners are clearly visible and confidently identified; do not hallucinate corners outside the image. The server will use the four corners for mild perspective/skew compensation and otherwise fall back to bounds. All numbers are fractions of the FULL uploaded image [0,1]. Find the top, right, bottom, left borders of the actual rectangular green field (not the outer white canvas or UI). Only crop to clearly visible boundaries; otherwise bounds={left:0,top:0,right:1,bottom:1}. goalEdge must be top/right/bottom/left ONLY when an actual rectangular goal and/or solid shooting circle visibly indicates the attacking end; otherwise unknown. In particular, if the goal is physically at the TOP of the image, goalEdge MUST be "top" even when the picture is taller than wide. rotation is informational; the server computes rotation from goalEdge. Do not mirror by default: flipHorizontal=false except when unmistakably necessary.
 
 TRACE BEFORE INTERPRETING: Study every individual object in source-image coordinates. Return only clearly drawn object centers, one JSON item per object, in the ORIGINAL image frame, NOT cropped, rotated, or moved. No rearrangement, equal spacing, inferred missing teammates, or tidy symmetrical formations. A player jersey icon is ONE player, not a cone; a numbered black jersey is still ONE player. Cones are the small triangular/tall traffic-cone icons; plain little white dots along a hockey field line are PRINTED FIELD MARKINGS and must NOT become balls. For every distinct JERSEY use type="player" and return shirtColor (black,orange,blue,grey,white,red,green) and label (visible jersey number or T; empty if none). Preserve shirt COLOR and NUMBERS literally; never convert shirt icons to attacker or defender circles. Preserve text as separate type="text" item with text exactly as printed (e.g. Steunspeler) and its center coordinates. Orange jerseys are player items, never cones. Keep all visible player positions even if colors repeat; never invent defensive formations, lines or extra objects. Use "hat" for flat colored marker discs only, "cone" for standing cones. Only output a separate "ball" if a distinct ball icon is clearly visible.
 
