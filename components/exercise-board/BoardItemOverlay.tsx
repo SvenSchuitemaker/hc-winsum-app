@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { COLORS } from "../../constants/theme";
 import type { BoardItem, HatColor } from "./boardTypes";
 import { HAT_COLOR_OPTIONS } from "./toolDefinitions";
@@ -55,8 +56,33 @@ export default function BoardItemOverlay({
             <Pressable onPress={onSelect} hitSlop={12} style={[styles.itemInner, isText && { width: 72, height: 30 }]}> 
                 {item.type === "text" && <Text numberOfLines={2} style={{ color: "#FFFFFF", fontSize: 10, textAlign: "center", fontWeight: "700" }}>{item.text}</Text>}
                 {item.type === "player" && (
-                    <View style={[styles.playerWrap, { backgroundColor: ({ black: "#171717", orange: "#F39A25", blue: "#199ED8", grey: "#A5A5A5", white: "#F5F5F5", red: "#D93945", green: "#2EAD72" } as Record<string,string>)[item.shirtColor ?? "blue"] }] }>
-                        <Text style={[styles.playerText, item.shirtColor === "white" && { color: "#111111" }]}>{item.label ?? ""}</Text>
+                    <View style={styles.jerseyWrap}>
+                        <Svg width={22} height={22} viewBox="0 0 22 22">
+                            <Path
+                                d="M 7 2.5 L 9 3.7 Q 11 5.3 13 3.7 L 15 2.5 L 21 6.5 L 18 12 L 15.9 10.9 L 15.9 20 L 6.1 20 L 6.1 10.9 L 4 12 L 1 6.5 Z"
+                                fill={({
+                                    black: "#171717",
+                                    orange: "#F39A25",
+                                    blue: "#199ED8",
+                                    grey: "#A5A5A5",
+                                    white: "#F5F5F5",
+                                    red: "#D93945",
+                                    green: "#2EAD72",
+                                } as Record<string, string>)[item.shirtColor ?? "blue"]}
+                                stroke={item.shirtColor === "white" ? "#555555" : "#ECECEC"}
+                                strokeWidth="0.85"
+                                strokeLinejoin="round"
+                            />
+                        </Svg>
+                        <Text
+                            numberOfLines={1}
+                            style={[
+                                styles.jerseyNumber,
+                                ["white", "orange", "grey"].includes(item.shirtColor ?? "") && { color: "#111111" },
+                            ]}
+                        >
+                            {item.label ?? ""}
+                        </Text>
                     </View>
                 )}
                 {item.type === "cone" && <View style={styles.cone} />}
@@ -148,6 +174,23 @@ const styles = StyleSheet.create({
         backgroundColor: "#FFFFFF",
         borderWidth: 1.5,
         borderColor: "#111111",
+    },
+    jerseyWrap: {
+        width: 22,
+        height: 22,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    jerseyNumber: {
+        position: "absolute",
+        top: 9,
+        left: 5,
+        width: 12,
+        textAlign: "center",
+        fontSize: 7,
+        lineHeight: 9,
+        fontWeight: "900",
+        color: "#FFFFFF",
     },
     playerWrap: {
         width: 18,
