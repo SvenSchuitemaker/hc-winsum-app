@@ -71,8 +71,33 @@ function parseCalibration(raw: unknown): FieldCalibration {
         br.x * bl.y - bl.x * br.y + bl.x * tl.y - tl.x * bl.y
       ) / 2;
       const edge = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-      if (area > 0.025 && edge(tl, tr) > 0.15 && edge(bl, br) > 0.15 &&
-          edge(tl, bl) > 0.15 && edge(tr, br) > 0.15) {
+      // Reject implausible/crossed quadrilaterals and hallucinated field corners.
+      // A bad transform is far worse than a slightly imperfect rectangular crop.
+      const signedCross = (a: Point, b: Point, c: Point) =>
+        (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      const winding = [
+        signedCross(tl, tr, br), signedCross(tr, br, bl),
+        signedCross(br, bl, tl), signedCross(bl, tl, tr),
+      ];
+      const convex = winding.every((v) => v > 0.0001) || winding.every((v) => v < -0.0001);
+      const quadBounds = {
+        left: Math.min(tl.x, tr.x, br.x, bl.x),
+        top: Math.min(tl.y, tr.y, br.y, bl.y),
+        right: Math.max(tl.x, tr.x, br.x, bl.x),
+        bottom: Math.max(tl.y, tr.y, br.y, bl.y),
+      };
+      const withinBounds =
+        Math.abs(quadBounds.left - left) < 0.12 &&
+        Math.abs(quadBounds.top - top) < 0.12 &&
+        Math.abs(quadBounds.right - right) < 0.12 &&
+        Math.abs(quadBounds.bottom - bottom) < 0.12;
+      const horizontalRatio = Math.max(edge(tl, tr), edge(bl, br)) /
+        Math.max(0.0001, Math.min(edge(tl, tr), edge(bl, br)));
+      const verticalRatio = Math.max(edge(tl, bl), edge(tr, br)) /
+        Math.max(0.0001, Math.min(edge(tl, bl), edge(tr, br)));
+      if (convex && withinBounds && horizontalRatio < 1.6 && verticalRatio < 1.6 &&
+          area > 0.08 && edge(tl, tr) > 0.2 && edge(bl, br) > 0.2 &&
+          edge(tl, bl) > 0.2 && edge(tr, br) > 0.2) {
         corners = { tl, tr, br, bl };
       }
     }
@@ -108,7 +133,9 @@ function inverseFieldQuad(point: Point, corners: NonNullable<FieldCalibration["c
 
 function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
   const { left, right, top, bottom } = calibration.bounds;
-  const corrected = calibration.corners ? inverseFieldQuad({ x, y }, calibration.corners) : null;
+  const candidate = calibration.corners ? inverseFieldQuad({ x, y }, calibration.corners) : null;
+  const corrected = candidate && candidate.x >= -0.08 && candidate.x <= 1.08 &&
+    candidate.y >= -0.08 && candidate.y <= 1.08 ? candidate : null;
   const u = corrected?.x ?? (x - left) / (right - left);
   const v = corrected?.y ?? (y - top) / (bottom - top);
   let transformed: Point;
