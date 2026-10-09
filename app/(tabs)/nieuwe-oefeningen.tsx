@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Image,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -21,6 +22,7 @@ import {
     uploadExerciseBoardPreview,
 } from "../../lib/exerciseBoardStorage";
 import { supabase } from "../../lib/supabase";
+import { analyzeExercisePhoto, selectExercisePhoto, uploadExercisePhoto, type SelectedExercisePhoto } from "../../lib/exercisePhotoImport";
 
 type DbCategory = {
     id: number;
@@ -46,7 +48,7 @@ const audienceOptions = [
 ];
 
 export default function NieuweOefeningenScreen() {
-    const { role } = useAuth();
+    const { role, user } = useAuth();
     const isSuperAdmin = role === "super_admin";
     const boardPreviewRef = useRef<ExerciseBoardEditorRef | null>(null);
 
@@ -54,6 +56,11 @@ export default function NieuweOefeningenScreen() {
     const [categorySlug, setCategorySlug] = useState("");
     const [title, setTitle] = useState("");
     const [imageUrl, setImageUrl] = useState("");
+    const [importPhoto, setImportPhoto] = useState<SelectedExercisePhoto | null>(null);
+    const [importMode, setImportMode] = useState<"photo" | "ai">("photo");
+    const [analyzing, setAnalyzing] = useState(false);
+    const [importError, setImportError] = useState("");
+    const [boardVersion, setBoardVersion] = useState(0);
     const [subtitle, setSubtitle] = useState("");
     const [explanation, setExplanation] = useState("");
     const [instructions, setInstructions] = useState("");
@@ -100,6 +107,39 @@ export default function NieuweOefeningenScreen() {
         }
     }
 
+    async function pickPhoto() {
+        try {
+            setImportError("");
+            const selected = await selectExercisePhoto();
+            if (!selected) return;
+            setImportPhoto(selected);
+        } catch (error) {
+            setImportError(error instanceof Error ? error.message : "Afbeelding selecteren mislukt.");
+        }
+    }
+
+    async function analyzePhoto() {
+        if (!importPhoto) return;
+        try {
+            setAnalyzing(true);
+            setImportError("");
+            const result = await analyzeExercisePhoto(importPhoto);
+            if (result.title) setTitle(result.title);
+            if (result.subtitle) setSubtitle(result.subtitle);
+            if (result.explanation) setExplanation(result.explanation);
+            if (result.instructions) setInstructions(result.instructions);
+            setBoardLayout(result.board_layout);
+            setBoardVersion((version) => version + 1);
+            if (!result.board_layout.items.length) {
+                setImportError("Geen herkenbare tekenobjecten gevonden. Je kunt de foto wel rechtstreeks opslaan.");
+            }
+        } catch (error) {
+            setImportError(error instanceof Error ? error.message : "AI-analyse mislukt.");
+        } finally {
+            setAnalyzing(false);
+        }
+    }
+
     function toggleAudience(audience: string) {
         setSelectedAudiences((current) =>
             current.includes(audience)
@@ -111,6 +151,9 @@ export default function NieuweOefeningenScreen() {
     function resetForm() {
         setTitle("");
         setImageUrl("");
+        setImportPhoto(null);
+        setImportError("");
+        setBoardVersion((version) => version + 1);
         setSubtitle("");
         setExplanation("");
         setInstructions("");
@@ -144,14 +187,19 @@ export default function NieuweOefeningenScreen() {
                 throw new Error("Supabase is niet geladen.");
             }
 
-            const hasBoardItems = boardLayout.items.length > 0;
+            const hasBoardItems = importMode === "ai" && boardLayout.items.length > 0 || !importPhoto && boardLayout.items.length > 0;
+            let savedImageUrl = imageUrl.trim() || null;
+            if (importPhoto && importMode === "photo") {
+                if (!user?.id) throw new Error("Log in om een foto toe te voegen.");
+                savedImageUrl = await uploadExercisePhoto(importPhoto, user.id);
+            }
 
             const { data: insertedExercise, error: insertError } = await supabase
                 .from("exercises")
                 .insert({
                     category_slug: categorySlug,
                     title: title.trim(),
-                    image_url: imageUrl.trim() || null,
+                    image_url: savedImageUrl,
                     subtitle: subtitle.trim() || null,
                     explanation: explanation.trim() || null,
                     instructions: instructions.trim() || null,
@@ -244,6 +292,30 @@ export default function NieuweOefeningenScreen() {
                     value={title}
                     onChangeText={setTitle}
                 />
+
+                <View style={styles.importBox}>
+                    <Text style={styles.label}>Foto importeren</Text>
+                    <Text style={styles.helpText}>Kies een bestaande hockeyoefening uit je galerij. Gebruik de originele foto of laat AI een bewerkbaar bord voorstellen.</Text>
+                    <View style={styles.importModes}>
+                        <Pressable style={[styles.modeButton, importMode === "photo" && styles.modeSelected]} onPress={() => setImportMode("photo")}>
+                            <Text style={styles.buttonText}>Originele foto</Text>
+                        </Pressable>
+                        <Pressable style={[styles.modeButton, importMode === "ai" && styles.modeSelected]} onPress={() => setImportMode("ai")}>
+                            <Text style={styles.buttonText}>AI natekenen</Text>
+                        </Pressable>
+                    </View>
+                    <Pressable style={styles.importButton} onPress={pickPhoto} disabled={loading || analyzing}>
+                        <Text style={styles.buttonText}>Foto kiezen</Text>
+                    </Pressable>
+                    {importPhoto && <Image source={{ uri: importPhoto.uri }} style={styles.importPreview} resizeMode="contain" />}
+                    {importPhoto && importMode === "ai" && (
+                        <Pressable style={styles.importButton} onPress={analyzePhoto} disabled={analyzing || loading}>
+                            {analyzing ? <ActivityIndicator color={COLORS.text} /> : <Text style={styles.buttonText}>Analyseer en teken na met AI</Text>}
+                        </Pressable>
+                    )}
+                    {!!importError && <Text style={styles.importError}>{importError}</Text>}
+                    {importMode === "ai" && <Text style={styles.helpText}>Controleer en corrigeer de automatisch herkende onderdelen in de editor hieronder voordat je opslaat.</Text>}
+                </View>
 
                 <Text style={styles.label}>Afbeelding URL (optioneel)</Text>
                 <TextInput
@@ -350,13 +422,14 @@ export default function NieuweOefeningenScreen() {
             </View>
 
             <ExerciseBoardEditor
+                key={boardVersion}
                 ref={boardPreviewRef}
                 value={boardLayout}
                 onChange={setBoardLayout}
             />
 
             <View style={styles.card}>
-                <Pressable style={styles.button} onPress={handleSave} disabled={loading}>
+                <Pressable style={styles.button} onPress={handleSave} disabled={loading || analyzing}>
                     {loading ? (
                         <ActivityIndicator color={COLORS.text} />
                     ) : (
@@ -369,6 +442,13 @@ export default function NieuweOefeningenScreen() {
 }
 
 const styles = StyleSheet.create({
+    importBox: { borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, borderRadius: RADIUS.lg, marginBottom: SPACING.md },
+    importModes: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
+    modeButton: { backgroundColor: COLORS.surfaceLight, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, flex: 1, padding: 9, alignItems: "center" },
+    modeSelected: { borderColor: COLORS.primaryLight, backgroundColor: COLORS.primary },
+    importButton: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, padding: SPACING.md, alignItems: "center", marginBottom: SPACING.md },
+    importPreview: { width: "100%", height: 220, marginBottom: SPACING.md },
+    importError: { color: "#F47777", marginBottom: SPACING.md },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
     center: {
