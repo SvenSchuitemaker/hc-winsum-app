@@ -248,3 +248,22 @@ export function renderHalfField() {
         </>
     );
 }
+/** Attacking goal at the top. Used for AI images normalized to goal-at-top. */
+export function renderTopField() {
+    const stroke = "#F4F7F0";
+    return (
+        <>
+            {Array.from({ length: 10 }).map((_, index) => (
+                <Rect key={`top-grass-${index}`} x="0" y={index * 10} width="100" height="10"
+                    fill={index % 2 === 0 ? "#4EAF00" : "#5EBA10"} />
+            ))}
+            <Rect x="4" y="4" width="92" height="92" stroke={stroke} strokeWidth="1" fill="none" />
+            <Line x1="4" y1="50" x2="96" y2="50" stroke={stroke} strokeWidth="0.9" />
+            <Path d="M 20 4 A 30 30 0 0 0 80 4" stroke={stroke} strokeWidth="1" fill="none" />
+            <Path d="M 10 4 A 40 40 0 0 0 90 4" stroke={stroke} strokeWidth="0.8"
+                fill="none" strokeDasharray="1.5 2.5" />
+            <Rect x="46" y="1.8" width="8" height="2.2" stroke={stroke} strokeWidth="0.6" fill="none" />
+            <Circle cx="50" cy="14" r="0.8" fill={stroke} />
+        </>
+    );
+}
