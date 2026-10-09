@@ -86,10 +86,18 @@ export default function ExerciseBoardCanvas({
                                         y1={y1}
                                         x2={x2}
                                         y2={y2}
-                                        stroke="#B8C7D9"
+                                        stroke={item.strokeColor ?? "#B8C7D9"}
                                         strokeWidth={selected ? "1.2" : "0.8"}
-                                        strokeDasharray="2 2"
+                                        strokeDasharray={item.dashed === false ? undefined : "2 2"}
                                     />
+                                    {item.arrowHead === true && (
+                                        <Path
+                                            d={getArrowHeadPath(x1, y1, x2, y2)}
+                                            stroke={item.strokeColor ?? "#B8C7D9"}
+                                            strokeWidth={selected ? "1.2" : "0.8"}
+                                            fill="none"
+                                        />
+                                    )}
                                 </G>
                             );
                         }
