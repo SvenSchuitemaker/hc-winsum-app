@@ -600,6 +600,42 @@ export default function DashboardScreen() {
                     </View>
                 </View>
 
+                <View style={styles.panel}>
+                    <SectionTitle
+                        icon="checkmark-done-outline"
+                        title="Afgeronde trainingen"
+                        subtitle="Trainingen met een ingevulde evaluatie"
+                    />
+                    {stats.completedTrainings.length === 0 ? (
+                        <Text style={styles.emptyText}>Er zijn nog geen trainingen geëvalueerd.</Text>
+                    ) : (
+                        stats.completedTrainings.map((training) => (
+                            <View key={training.id} style={styles.evaluationCard}>
+                                <Pressable onPress={() => router.push(`/training/${training.id}`)}>
+                                    <Text style={styles.evaluationTitle}>{training.title}  <Ionicons name="arrow-forward-outline" size={16} color={COLORS.primaryLight} /></Text>
+                                    <Text style={styles.evaluationMeta}>
+                                        {formatDate(training.training_date)} · {training.team} · {training.trainer}
+                                    </Text>
+                                    {training.evaluator !== training.trainer && (
+                                        <Text style={styles.evaluationMeta}>Evaluatie door {training.evaluator}</Text>
+                                    )}
+                                </Pressable>
+                                {([
+                                    ["Wat ging goed?", training.evaluation.what_went_well],
+                                    ["Wat kan beter?", training.evaluation.what_to_improve],
+                                    ["Aandacht voor volgende keer", training.evaluation.next_time_notes],
+                                    ["Opkomst / bijzonderheden", training.evaluation.attendance_note],
+                                ] as const).filter(([, value]) => !!value?.trim()).map(([label, value]) => (
+                                    <View key={label} style={styles.evaluationSection}>
+                                        <Text style={styles.evaluationLabel}>{label}</Text>
+                                        <Text style={styles.evaluationBody}>{value}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        ))
+                    )}
+                </View>
+
                 <View style={[styles.columns, isDesktop && styles.columnsDesktop]}>
                     <View style={[styles.panel, isDesktop && styles.panelHalf]}>
                         <SectionTitle
@@ -674,42 +710,6 @@ export default function DashboardScreen() {
                             />
                         ))}
                     </View>
-                </View>
-
-                <View style={styles.panel}>
-                    <SectionTitle
-                        icon="checkmark-done-outline"
-                        title="Afgeronde trainingen"
-                        subtitle="Trainingen met een ingevulde evaluatie"
-                    />
-                    {stats.completedTrainings.length === 0 ? (
-                        <Text style={styles.emptyText}>Er zijn nog geen trainingen geëvalueerd.</Text>
-                    ) : (
-                        stats.completedTrainings.map((training) => (
-                            <View key={training.id} style={styles.evaluationCard}>
-                                <Pressable onPress={() => router.push(`/training/${training.id}`)}>
-                                    <Text style={styles.evaluationTitle}>{training.title}  <Ionicons name="arrow-forward-outline" size={16} color={COLORS.primaryLight} /></Text>
-                                    <Text style={styles.evaluationMeta}>
-                                        {formatDate(training.training_date)} · {training.team} · {training.trainer}
-                                    </Text>
-                                    {training.evaluator !== training.trainer && (
-                                        <Text style={styles.evaluationMeta}>Evaluatie door {training.evaluator}</Text>
-                                    )}
-                                </Pressable>
-                                {([
-                                    ["Wat ging goed?", training.evaluation.what_went_well],
-                                    ["Wat kan beter?", training.evaluation.what_to_improve],
-                                    ["Aandacht voor volgende keer", training.evaluation.next_time_notes],
-                                    ["Opkomst / bijzonderheden", training.evaluation.attendance_note],
-                                ] as const).filter(([, value]) => !!value?.trim()).map(([label, value]) => (
-                                    <View key={label} style={styles.evaluationSection}>
-                                        <Text style={styles.evaluationLabel}>{label}</Text>
-                                        <Text style={styles.evaluationBody}>{value}</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        ))
-                    )}
                 </View>
 
                 <View style={styles.panel}>
