@@ -53,6 +53,9 @@ export function sanitizeLayout(value?: ExerciseBoardLayout | null): ExerciseBoar
     return {
         fieldMode: "half",
         items: Array.isArray(value?.items) ? value.items.map(sanitizeItem) : [],
+        backgroundImageUrl: typeof value?.backgroundImageUrl === "string" ? value.backgroundImageUrl : null,
+        backgroundOpacity: typeof value?.backgroundOpacity === "number" && Number.isFinite(value.backgroundOpacity)
+            ? Math.max(0, Math.min(1, value.backgroundOpacity)) : 0.65,
     };
 }
 
