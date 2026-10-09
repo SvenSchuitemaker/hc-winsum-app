@@ -23,6 +23,7 @@ type FieldCalibration = {
   bounds: { left: number; top: number; right: number; bottom: number };
   rotation: 0 | 90 | 180 | 270;
   flipHorizontal: boolean;
+  goalEdge?: "top" | "right" | "bottom" | "left" | "unknown";
 };
 
 // Coordinates returned by the vision model are in the full source image.
@@ -42,9 +43,15 @@ function parseCalibration(raw: unknown): FieldCalibration {
   if (values.some((n) => !Number.isFinite(n) || n < 0 || n > 1)) return fallback;
   const [left, top, right, bottom] = values;
   if (right - left < 0.2 || bottom - top < 0.2) return fallback;
-  const rotation = [0, 90, 180, 270].includes(Number(obj.rotation))
-    ? Number(obj.rotation) as 0 | 90 | 180 | 270 : 0;
-  return { bounds: { left, top, right, bottom }, rotation, flipHorizontal: obj.flipHorizontal === true };
+  // The goal edge is a more reliable orientation instruction than a generated angle.
+  // A goal at the top needs NO rotation, even for a portrait/cropped source.
+  const goalEdge = ["top", "right", "bottom", "left", "unknown"].includes(String(obj.goalEdge))
+    ? String(obj.goalEdge) as FieldCalibration["goalEdge"] : "unknown";
+  const rotationByGoalEdge = { top: 0, right: 270, bottom: 180, left: 90 } as const;
+  const rotation = goalEdge && goalEdge !== "unknown"
+    ? rotationByGoalEdge[goalEdge]
+    : 0; // Do not trust arbitrary model rotations without a visible goal edge.
+  return { bounds: { left, top, right, bottom }, rotation, flipHorizontal: obj.flipHorizontal === true && goalEdge !== "unknown", goalEdge };
 }
 
 function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
@@ -120,11 +127,20 @@ Deno.serve(async (request) => {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        // Use a full vision-capable model for pixel-position analysis; configurable for budgets.
+        model: Deno.env.get("OPENAI_EXERCISE_VISION_MODEL") || "gpt-4o",
         temperature: 0.1,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: `Analyze a field hockey coaching drill image. Output only JSON object with title, subtitle, explanation, instructions, calibration, and items. calibration must be {bounds:{left,top,right,bottom},rotation,flipHorizontal}. First detect the visible hockey FIELD region in full-image normalized coordinates, excluding any headings, legends, margins and surrounding text. bounds are the axis-aligned field rectangle; use {left:0,top:0,right:1,bottom:1} if no reliable field boundary is visible. Choose rotation (0, 90, 180 or 270 degrees clockwise) needed to bring the goal/attacking circle to the TOP of the output board. Set flipHorizontal true only when the source is clearly mirrored relative to the normal goal-at-top field. Do not infer rotation from player movement alone when field markings are missing; prefer 0. Every item must keep source-image coordinates (BEFORE crop, rotation or flip); server applies calibration exactly once. items is an array of editable diagram pieces. Each item: type (cone, hat, attacker, defender, trainer, ball, goal, runLine, passLine, guideLine), x, y normalized 0..1. Lines need x2,y2 and optional lineStyle (straight, zigzag, arc, bounce, passeer). Hats optional color white/orange/yellow/red/blue/green. Goals optional rotation number. Treat the image as a 2D canvas: x=0 at its left edge, x=1 at its right edge, y=0 at its top edge, y=1 at its bottom edge. Locate every visible player, cone, ball, goal and line by its actual pixel position relative to the COMPLETE IMAGE, not a guessed hockey field. For line objects, place x,y and x2,y2 at the visible start and end of the stroke. Do not invent objects or rearrange the drill. Preserve all distances, line endpoints and spatial relationships precisely, using normalized image coordinates without shifting pieces to aesthetically pleasing positions. Do not mistake printed field markers for cones or players. Prefer fewer accurate objects to extra speculative objects. Positions must match the visual hockey diagram. If the picture is not a diagram, return items:[] rather than inventing. Be cautious with uncertain elements. Write human readable fields in Dutch and never copy visible personal/contact information.` },
+          { role: "system", content: `You are an accurate field hockey exercise diagram TRACER, not a diagram designer. Return one JSON object: title, subtitle, explanation, instructions, calibration, items.
+
+GEOMETRY FIRST: calibration={bounds:{left,top,right,bottom},goalEdge,rotation,flipHorizontal}. All numbers are fractions of the FULL uploaded image [0,1]. Find the top, right, bottom, left borders of the actual rectangular green field (not the outer white canvas or UI). Only crop to clearly visible boundaries; otherwise bounds={left:0,top:0,right:1,bottom:1}. goalEdge must be top/right/bottom/left ONLY when an actual rectangular goal and/or solid shooting circle visibly indicates the attacking end; otherwise unknown. In particular, if the goal is physically at the TOP of the image, goalEdge MUST be "top" even when the picture is taller than wide. rotation is informational; the server computes rotation from goalEdge. Do not mirror by default: flipHorizontal=false except when unmistakably necessary.
+
+TRACE BEFORE INTERPRETING: Study every individual object in source-image coordinates. Return only clearly drawn object centers, one JSON item per object, in the ORIGINAL image frame, NOT cropped, rotated, or moved. No rearrangement, equal spacing, inferred missing teammates, or tidy symmetrical formations. A player jersey icon is ONE player, not a cone; a numbered black jersey is still ONE player. Cones are the small triangular/tall traffic-cone icons; plain little white dots along a hockey field line are PRINTED FIELD MARKINGS and must NOT become balls. Colored players: blue/cyan jerseys -> attacker, black/dark jerseys -> defender, grey T jersey -> trainer. Orange jerseys are players too (attacker), not cones. Keep all visible player positions even if colors repeat; never invent defensive formations, lines or extra objects. Use "hat" for flat colored marker discs only, "cone" for standing cones. Only output a separate "ball" if a distinct ball icon is clearly visible.
+
+LINE TRACING: For every visible black arrow, create exactly one line item with its original x,y start and x2,y2 end at the actual arrow tip. Type passLine for a ball pass and runLine for a player movement when obvious; default guideLine if unclear. Do NOT turn white field markings/circles into exercise lines. Keep original directions. Every line endpoint uses normalized FULL image coordinates. Never add speculative arrows.
+
+JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?}. Types: cone,hat,attacker,defender,trainer,ball,goal,runLine,passLine,guideLine. Lines require x2,y2, optional lineStyle straight/zigzag/arc/bounce/passeer. Hats may have color white/orange/yellow/red/blue/green. Output object centers and line endpoints with THREE decimal places. Be meticulous with geometry and count; do not create approximate diagrams from a verbal interpretation. Write description fields in Dutch, never reproduce personal/contact information. If not a diagram, items=[].` },
           { role: "user", content: [
             { type: "text", text: "Convert this hockey exercise photo to editable pieces and draft an exercise description. Any guesswork must be conservative." },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
