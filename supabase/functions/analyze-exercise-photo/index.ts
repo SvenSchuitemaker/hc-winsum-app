@@ -87,7 +87,29 @@ Deno.serve(async (request) => {
         ],
       }),
     });
-    if (!response.ok) return json({ error: "Image analysis failed. Please try again." }, 502);
+    if (!response.ok) {
+      // Never return credentials, raw provider responses, or submitted images.
+      let providerCode = "";
+      try {
+        const failure = await response.json();
+        providerCode = typeof failure?.error?.code === "string" ? failure.error.code : "";
+      } catch {
+        // Provider may return a non-JSON error page.
+      }
+      let message = "AI-analyse mislukt bij de AI-dienst. Probeer het later opnieuw.";
+      if (response.status === 401 || providerCode === "invalid_api_key") {
+        message = "De OpenAI API-sleutel is ongeldig. Controleer OPENAI_API_KEY in Supabase Secrets.";
+      } else if (providerCode === "insufficient_quota") {
+        message = "Het OpenAI API-account heeft onvoldoende API-tegoed. Controleer Billing en Usage op platform.openai.com.";
+      } else if (response.status === 429) {
+        message = "OpenAI heeft een gebruikslimiet bereikt. Controleer API-tegoed en limieten of probeer later opnieuw.";
+      } else if (response.status === 403) {
+        message = "Het OpenAI-project heeft geen toegang tot deze AI-aanvraag. Controleer de projectrechten.";
+      } else if (response.status === 400 || response.status === 404) {
+        message = "OpenAI accepteert deze afbeelding of dit model niet. Controleer het AI-model en probeer een andere foto.";
+      }
+      return json({ error: message, provider_status: response.status, provider_code: providerCode || null }, 502);
+    }
     const result = await response.json();
     const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
