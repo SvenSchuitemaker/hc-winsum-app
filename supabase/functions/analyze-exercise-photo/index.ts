@@ -18,7 +18,51 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   status, headers: { ...cors, "Content-Type": "application/json" },
 });
 
-function normalizedItems(items: unknown) {
+type Point = { x: number; y: number };
+type FieldCalibration = {
+  bounds: { left: number; top: number; right: number; bottom: number };
+  rotation: 0 | 90 | 180 | 270;
+  flipHorizontal: boolean;
+};
+
+// Coordinates returned by the vision model are in the full source image.
+// Remove margins around the detected field before rotating to our goal-at-top editor.
+function parseCalibration(raw: unknown): FieldCalibration {
+  const fallback: FieldCalibration = {
+    bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+    rotation: 0,
+    flipHorizontal: false,
+  };
+  if (!raw || typeof raw !== "object") return fallback;
+  const obj = raw as Record<string, unknown>;
+  const b = obj.bounds;
+  if (!b || typeof b !== "object") return fallback;
+  const box = b as Record<string, unknown>;
+  const values = ["left", "top", "right", "bottom"].map((key) => Number(box[key]));
+  if (values.some((n) => !Number.isFinite(n) || n < 0 || n > 1)) return fallback;
+  const [left, top, right, bottom] = values;
+  if (right - left < 0.2 || bottom - top < 0.2) return fallback;
+  const rotation = [0, 90, 180, 270].includes(Number(obj.rotation))
+    ? Number(obj.rotation) as 0 | 90 | 180 | 270 : 0;
+  return { bounds: { left, top, right, bottom }, rotation, flipHorizontal: obj.flipHorizontal === true };
+}
+
+function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
+  const { left, right, top, bottom } = calibration.bounds;
+  const u = (x - left) / (right - left);
+  const v = (y - top) / (bottom - top);
+  let transformed: Point;
+  switch (calibration.rotation) {
+    case 90: transformed = { x: 1 - v, y: u }; break;
+    case 180: transformed = { x: 1 - u, y: 1 - v }; break;
+    case 270: transformed = { x: v, y: 1 - u }; break;
+    default: transformed = { x: u, y: v };
+  }
+  if (calibration.flipHorizontal) transformed.x = 1 - transformed.x;
+  return { x: Math.min(0.98, Math.max(0.02, transformed.x)), y: Math.min(0.98, Math.max(0.02, transformed.y)) };
+}
+
+function normalizedItems(items: unknown, calibration: FieldCalibration) {
   if (!Array.isArray(items)) return [];
   return items.slice(0, 120).flatMap((item, index) => {
     if (!item || typeof item !== "object") return [];
@@ -26,14 +70,15 @@ function normalizedItems(items: unknown) {
     if (!itemTypes.has(String(entry.type))) return [];
     const x = Number(entry.x), y = Number(entry.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
-    const clamp = (v: number) => Math.min(0.98, Math.max(0.02, v));
+    const point = calibratedPoint(x, y, calibration);
     const type = String(entry.type);
-    const result: Record<string, unknown> = { id: `import-${index}`, type, x: clamp(x), y: clamp(y) };
+    const result: Record<string, unknown> = { id: `import-${index}`, type, x: point.x, y: point.y };
     if (lineTypes.has(type)) {
       const x2 = Number(entry.x2), y2 = Number(entry.y2);
       if (!Number.isFinite(x2) || !Number.isFinite(y2)) return [];
-      result.x2 = clamp(x2);
-      result.y2 = clamp(y2);
+      const end = calibratedPoint(x2, y2, calibration);
+      result.x2 = end.x;
+      result.y2 = end.y;
       if (styles.has(String(entry.lineStyle))) result.lineStyle = entry.lineStyle;
     }
     if (type === "hat") result.color = colors.has(String(entry.color)) ? entry.color : "yellow";
@@ -79,7 +124,7 @@ Deno.serve(async (request) => {
         temperature: 0.1,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: `Analyze a field hockey coaching drill image. Output only JSON object with title, subtitle, explanation, instructions, and items. items is an array of editable diagram pieces. Each item: type (cone, hat, attacker, defender, trainer, ball, goal, runLine, passLine, guideLine), x, y normalized 0..1. Lines need x2,y2 and optional lineStyle (straight, zigzag, arc, bounce, passeer). Hats optional color white/orange/yellow/red/blue/green. Goals optional rotation number. Treat the image as a 2D canvas: x=0 at its left edge, x=1 at its right edge, y=0 at its top edge, y=1 at its bottom edge. Locate every visible player, cone, ball, goal and line by its actual pixel position relative to the COMPLETE IMAGE, not a guessed hockey field. For line objects, place x,y and x2,y2 at the visible start and end of the stroke. Do not invent objects or rearrange the drill. Preserve all distances, line endpoints and spatial relationships precisely, using normalized image coordinates without shifting pieces to aesthetically pleasing positions. Do not mistake printed field markers for cones or players. Prefer fewer accurate objects to extra speculative objects. Positions must match the visual hockey diagram. If the picture is not a diagram, return items:[] rather than inventing. Be cautious with uncertain elements. Write human readable fields in Dutch and never copy visible personal/contact information.` },
+          { role: "system", content: `Analyze a field hockey coaching drill image. Output only JSON object with title, subtitle, explanation, instructions, calibration, and items. calibration must be {bounds:{left,top,right,bottom},rotation,flipHorizontal}. First detect the visible hockey FIELD region in full-image normalized coordinates, excluding any headings, legends, margins and surrounding text. bounds are the axis-aligned field rectangle; use {left:0,top:0,right:1,bottom:1} if no reliable field boundary is visible. Choose rotation (0, 90, 180 or 270 degrees clockwise) needed to bring the goal/attacking circle to the TOP of the output board. Set flipHorizontal true only when the source is clearly mirrored relative to the normal goal-at-top field. Do not infer rotation from player movement alone when field markings are missing; prefer 0. Every item must keep source-image coordinates (BEFORE crop, rotation or flip); server applies calibration exactly once. items is an array of editable diagram pieces. Each item: type (cone, hat, attacker, defender, trainer, ball, goal, runLine, passLine, guideLine), x, y normalized 0..1. Lines need x2,y2 and optional lineStyle (straight, zigzag, arc, bounce, passeer). Hats optional color white/orange/yellow/red/blue/green. Goals optional rotation number. Treat the image as a 2D canvas: x=0 at its left edge, x=1 at its right edge, y=0 at its top edge, y=1 at its bottom edge. Locate every visible player, cone, ball, goal and line by its actual pixel position relative to the COMPLETE IMAGE, not a guessed hockey field. For line objects, place x,y and x2,y2 at the visible start and end of the stroke. Do not invent objects or rearrange the drill. Preserve all distances, line endpoints and spatial relationships precisely, using normalized image coordinates without shifting pieces to aesthetically pleasing positions. Do not mistake printed field markers for cones or players. Prefer fewer accurate objects to extra speculative objects. Positions must match the visual hockey diagram. If the picture is not a diagram, return items:[] rather than inventing. Be cautious with uncertain elements. Write human readable fields in Dutch and never copy visible personal/contact information.` },
           { role: "user", content: [
             { type: "text", text: "Convert this hockey exercise photo to editable pieces and draft an exercise description. Any guesswork must be conservative." },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -112,13 +157,14 @@ Deno.serve(async (request) => {
     }
     const result = await response.json();
     const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    const calibration = parseCalibration(parsed.calibration);
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
       subtitle: safeText(parsed.subtitle).slice(0, 300),
       explanation: safeText(parsed.explanation),
       instructions: safeText(parsed.instructions),
-      board_layout: { fieldMode: "half", items: normalizedItems(parsed.items) },
+      board_layout: { fieldMode: "half", items: normalizedItems(parsed.items, calibration) },
     });
   } catch {
     return json({ error: "Could not analyze this image." }, 500);
