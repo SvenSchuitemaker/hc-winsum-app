@@ -33,7 +33,12 @@
     },
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      ["expo-image-picker", {
+        "photosPermission": "Allow H.C. Winsum to select images for hockey exercises.",
+        "cameraPermission": false,
+        "microphonePermission": false
+      }]
     ],
     "experiments": {
       "baseUrl": "/hc-winsum-app"
