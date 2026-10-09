@@ -2,7 +2,6 @@ import { Picker } from "@react-native-picker/picker";
 import { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Image,
     Pressable,
     ScrollView,
@@ -71,6 +70,8 @@ export default function NieuweOefeningenScreen() {
     const [boardLayout, setBoardLayout] = useState<ExerciseBoardLayout>(createEmptyBoardLayout());
     const [loading, setLoading] = useState(false);
     const [loadingCategories, setLoadingCategories] = useState(true);
+    const [formError, setFormError] = useState("");
+    const [formSuccess, setFormSuccess] = useState("");
 
     useEffect(() => {
         loadCategories();
@@ -98,10 +99,7 @@ export default function NieuweOefeningenScreen() {
                 setCategorySlug(loadedCategories[0].slug);
             }
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Categorieën laden mislukt."
-            );
+            setFormError(error instanceof Error ? error.message : "Categorieën laden mislukt.");
         } finally {
             setLoadingCategories(false);
         }
@@ -154,6 +152,7 @@ export default function NieuweOefeningenScreen() {
     function resetForm() {
         setTitle("");
         setImageUrl("");
+        setFormError("");
         setImportPhoto(null);
         setImportError("");
         setBoardVersion((version) => version + 1);
@@ -169,22 +168,24 @@ export default function NieuweOefeningenScreen() {
 
     async function handleSave() {
         if (!isSuperAdmin) {
-            Alert.alert("Geen toegang", "Alleen super admins kunnen oefeningen toevoegen.");
+            setFormError("Alleen super admins kunnen oefeningen toevoegen.");
             return;
         }
 
         if (!categorySlug || !title.trim()) {
-            Alert.alert("Ontbrekende velden", "Kies een categorie en vul een titel in.");
+            setFormError("Kies een categorie en vul een titel in.");
             return;
         }
 
         if (!difficulty) {
-            Alert.alert("Ontbrekende velden", "Kies een moeilijkheid.");
+            setFormError("Kies een moeilijkheid.");
             return;
         }
 
         try {
             setLoading(true);
+            setFormError("");
+            setFormSuccess("");
 
             if (!supabase) {
                 throw new Error("Supabase is niet geladen.");
@@ -235,13 +236,10 @@ export default function NieuweOefeningenScreen() {
                 if (updateError) throw updateError;
             }
 
-            Alert.alert("Gelukt", "De oefening is toegevoegd.");
             resetForm();
+            setFormSuccess("De oefening is toegevoegd aan de bibliotheek.");
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Opslaan mislukt."
-            );
+            setFormError(error instanceof Error ? error.message : "Opslaan mislukt.");
         } finally {
             setLoading(false);
         }
@@ -270,6 +268,8 @@ export default function NieuweOefeningenScreen() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.card}>
                 <Text style={styles.title}>Nieuwe oefening toevoegen</Text>
+                {!!formSuccess && <Text style={styles.successText}>{formSuccess}</Text>}
+                {!!formError && <Text style={styles.importError}>{formError}</Text>}
 
                 <Text style={styles.label}>Categorie</Text>
                 <View style={styles.pickerWrap}>
@@ -435,6 +435,7 @@ export default function NieuweOefeningenScreen() {
             />
 
             <View style={styles.card}>
+                {!!formError && <Text style={styles.importError}>{formError}</Text>}
                 <Pressable style={styles.button} onPress={handleSave} disabled={loading || analyzing}>
                     {loading ? (
                         <ActivityIndicator color={COLORS.text} />
@@ -455,6 +456,7 @@ const styles = StyleSheet.create({
     importButton: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, padding: SPACING.md, alignItems: "center", marginBottom: SPACING.md },
     importPreview: { width: "100%", height: 220, marginBottom: SPACING.md },
     importError: { color: "#F47777", marginBottom: SPACING.md },
+    successText: { color: "#74D49B", fontSize: 14, fontWeight: "700", marginBottom: SPACING.md },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
     center: {
