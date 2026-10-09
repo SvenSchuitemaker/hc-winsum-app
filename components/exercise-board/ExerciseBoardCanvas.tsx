@@ -12,6 +12,7 @@ import {
     getZigzagArrowAngle,
     getZigzagRunPath,
     renderHalfField,
+    renderTopField,
 } from "./boardRenderUtils";
 import type { BoardItem } from "./boardTypes";
 
@@ -28,6 +29,7 @@ type Props = {
     boardWidth: number;
     boardHeight: number;
     itemLabels: Record<string, string>;
+    fieldOrientation?: "right" | "top";
     backgroundImageUrl?: string | null;
     backgroundOpacity?: number;
     showBackground?: boolean;
@@ -47,6 +49,7 @@ export default function ExerciseBoardCanvas({
     boardHeight,
     itemLabels,
     backgroundImageUrl,
+    fieldOrientation = "right",
     backgroundOpacity = 0.65,
     showBackground = true,
 }: Props) {
@@ -54,7 +57,7 @@ export default function ExerciseBoardCanvas({
         <View ref={captureTargetRef} collapsable={false}>
             <View style={boardStyle} onLayout={onLayout} {...panHandlers}>
                 <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    {renderHalfField()}
+                    {fieldOrientation === "top" ? renderTopField() : renderHalfField()}
                     {backgroundImageUrl && showBackground && (
                         <SvgImage href={{ uri: backgroundImageUrl }} x="0" y="0" width="100" height="100" opacity={backgroundOpacity} preserveAspectRatio="none" />
                     )}
