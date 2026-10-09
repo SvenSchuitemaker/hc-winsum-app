@@ -511,6 +511,34 @@ function normalizeTrainerObjects(items: Array<Record<string, unknown>>) {
   return items.filter((item) => !removed.has(item));
 }
 
+// Merge the grey and black playing teams only after trainer recognition and
+// position/number matching. Keep the trainer's T jersey grey in stored layouts.
+function normalizeGreyTeamPlayers(items: Array<Record<string, unknown>>) {
+  const normalized = items.map((item) => {
+    if (item.type !== "player" || item.shirtColor !== "grey" ||
+        String(item.label ?? "").trim().toUpperCase() === "T") return item;
+    return { ...item, shirtColor: "black" };
+  });
+  // Grey and black detections of the same numbered jersey can become identical
+  // after normalization. Deduplicate ONLY this cross-color overlap, never
+  // distinct numbers, unnumbered nearby shirts, or trainer objects.
+  const seen = new Set<number>();
+  return normalized.filter((item, index) => {
+    if (item.type !== "player" || item.shirtColor !== "black") return true;
+    const label = String(item.label ?? "").trim();
+    if (!label) return true;
+    const duplicate = normalized.findIndex((other, otherIndex) =>
+      otherIndex < index && !seen.has(otherIndex) &&
+      other.type === "player" && other.shirtColor === "black" &&
+      String(other.label ?? "").trim() === label &&
+      items[otherIndex].shirtColor !== items[index].shirtColor &&
+      Math.hypot(Number(other.x) - Number(item.x), Number(other.y) - Number(item.y)) < 0.018);
+    if (duplicate < 0) return true;
+    seen.add(index);
+    return false;
+  });
+}
+
 function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
   const players = items.filter((item) => item.type === "player" || item.type === "trainer" ||
     item.type === "attacker" || item.type === "defender");
@@ -648,9 +676,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
+    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
       auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
-    )))));
+    ))))));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
