@@ -1,6 +1,6 @@
 import React from "react";
 import { View } from "react-native";
-import Svg, { G, Line, Path } from "react-native-svg";
+import Svg, { G, Image as SvgImage, Line, Path } from "react-native-svg";
 import BoardItemOverlay from "./BoardItemOverlay";
 import {
     getArcArrowAngle,
@@ -28,6 +28,9 @@ type Props = {
     boardWidth: number;
     boardHeight: number;
     itemLabels: Record<string, string>;
+    backgroundImageUrl?: string | null;
+    backgroundOpacity?: number;
+    showBackground?: boolean;
 };
 
 export default function ExerciseBoardCanvas({
@@ -43,12 +46,17 @@ export default function ExerciseBoardCanvas({
     boardWidth,
     boardHeight,
     itemLabels,
+    backgroundImageUrl,
+    backgroundOpacity = 0.65,
+    showBackground = true,
 }: Props) {
     return (
         <View ref={captureTargetRef} collapsable={false}>
             <View style={boardStyle} onLayout={onLayout} {...panHandlers}>
                 <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    {renderHalfField()}
+                    {backgroundImageUrl && showBackground ? (
+                        <SvgImage href={{ uri: backgroundImageUrl }} x="0" y="0" width="100" height="100" opacity={backgroundOpacity} preserveAspectRatio="none" />
+                    ) : renderHalfField()}
 
                     {lineItems.map((item: BoardItem) => {
                         const x1 = item.x * 100;

@@ -54,6 +54,9 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
 
         const [fieldMode] = useState<FieldMode>(initialLayoutRef.current.fieldMode);
         const [items, setItems] = useState(initialLayoutRef.current.items);
+        const [backgroundImageUrl, setBackgroundImageUrl] = useState(initialLayoutRef.current.backgroundImageUrl);
+        const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
+        const [showBackground, setShowBackground] = useState(true);
         const [selectedTool, setSelectedTool] = useState<ToolType>("select");
         const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
         const [boardSize, setBoardSize] = useState({ width: 1, height: 1 });
@@ -99,12 +102,14 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
 
             const next = sanitizeLayout(value);
             setItems(next.items);
+            setBackgroundImageUrl(next.backgroundImageUrl);
+            setBackgroundOpacity(next.backgroundOpacity ?? 0.65);
             hydratedFromPropsRef.current = true;
         }, [value]);
 
         useEffect(() => {
-            onChange?.({ fieldMode, items });
-        }, [fieldMode, items, onChange]);
+            onChange?.({ fieldMode, items, backgroundImageUrl, backgroundOpacity });
+        }, [fieldMode, items, backgroundImageUrl, backgroundOpacity, onChange]);
 
         const itemLabels = useMemo(() => buildItemLabels(items), [items]);
 
@@ -385,6 +390,20 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         {TOOLS.find((tool: ToolOption) => tool.type === selectedTool)?.label}
                     </Text>
 
+                    {!!backgroundImageUrl && (
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
+                            <Pressable onPress={() => setShowBackground((current) => !current)} style={styles.toolButton}>
+                                <Text style={styles.toolText}>{showBackground ? "Verberg referentiefoto" : "Toon referentiefoto"}</Text>
+                            </Pressable>
+                            <Pressable onPress={() => setBackgroundOpacity((current) => Math.max(0.2, Math.round((current - 0.1) * 10) / 10))} style={styles.toolButton}>
+                                <Text style={styles.toolText}>−</Text>
+                            </Pressable>
+                            <Text style={styles.helperText}>Foto {Math.round(backgroundOpacity * 100)}%</Text>
+                            <Pressable onPress={() => setBackgroundOpacity((current) => Math.min(1, Math.round((current + 0.1) * 10) / 10))} style={styles.toolButton}>
+                                <Text style={styles.toolText}>+</Text>
+                            </Pressable>
+                        </View>
+                    )}
                     <ExerciseBoardCanvas
                         captureTargetRef={captureTargetRef}
                         boardStyle={[styles.board, styles.halfBoard]}
@@ -398,6 +417,9 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         boardWidth={boardSize.width}
                         boardHeight={boardSize.height}
                         itemLabels={itemLabels}
+                        backgroundImageUrl={backgroundImageUrl}
+                        backgroundOpacity={backgroundOpacity}
+                        showBackground={showBackground}
                     />
                 </View>
 

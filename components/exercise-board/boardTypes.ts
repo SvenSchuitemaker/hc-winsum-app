@@ -65,6 +65,8 @@ export type BoardItem = {
 export type ExerciseBoardLayout = {
     fieldMode: FieldMode;
     items: BoardItem[];
+    backgroundImageUrl?: string | null;
+    backgroundOpacity?: number;
 };
 
 export type ExerciseBoardEditorRef = {
