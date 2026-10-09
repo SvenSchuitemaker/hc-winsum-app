@@ -52,6 +52,7 @@ export function sanitizeItem(item: BoardItem): BoardItem {
 export function sanitizeLayout(value?: ExerciseBoardLayout | null): ExerciseBoardLayout {
     return {
         fieldMode: "half",
+        fieldOrientation: value?.fieldOrientation === "top" ? "top" : "right",
         items: Array.isArray(value?.items) ? value.items.map(sanitizeItem) : [],
         backgroundImageUrl: typeof value?.backgroundImageUrl === "string" ? value.backgroundImageUrl : null,
         backgroundOpacity: typeof value?.backgroundOpacity === "number" && Number.isFinite(value.backgroundOpacity)
