@@ -363,7 +363,25 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       ? parsed.items.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type))) : [];
     const fallbackArrows = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
-    const normalized = normalizedItems([...visualItems, ...(arrowItems.length ? arrowItems : fallbackArrows)], calibration);
+    // Use original image pixels for cone centers when web-side detection succeeds.
+    // In particular, do not retain hallucinated cone rows from the model.
+    const pixelCones = Array.isArray(body?.detectedCones) && body.detectedCones.length <= 80
+      ? body.detectedCones.filter((point: unknown) => {
+          if (!point || typeof point !== "object") return false;
+          const p = point as Record<string, unknown>;
+          return typeof p.x === "number" && typeof p.y === "number" &&
+            Number.isFinite(p.x) && Number.isFinite(p.y) &&
+            p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
+        }) : [];
+    const sourceItems = pixelCones.length
+      ? visualItems.filter((item: Record<string, unknown>) => item?.type !== "cone")
+      : visualItems;
+    const mappedCones = pixelCones.map((point: { x: number; y: number }) =>
+      ({ type: "cone", x: point.x, y: point.y }));
+    const normalized = normalizedItems(
+      [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
+      calibration,
+    );
     const uniqueItems = applyDiagramConstraints(deduplicateDetections(normalized));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
