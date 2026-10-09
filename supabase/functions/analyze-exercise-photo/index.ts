@@ -423,7 +423,7 @@ function anchorPixelPlayers(
     const origin = { x: Number(item.x), y: Number(item.y) };
     const matching = candidates.map((candidate, index) => ({
       candidate, index, distance: distance(origin, candidate),
-    })).filter(({ candidate, distance: d }) => allowed.some((color) => compatibleColors({ ...item, shirtColor: color }, candidate.shirtColor)) && d <= radius)
+    })).filter(({ candidate, distance: d }) => allowed.some((color) => color === candidate.shirtColor || (item.type === "player" && compatibleColors({ ...item, shirtColor: color }, candidate.shirtColor))) && d <= radius)
       .sort((a, b) => a.distance - b.distance);
     if (!matching.length || used.has(matching[0].index)) return null;
     if (matching.length > 1 && matching[1].distance - matching[0].distance < 0.025) return null;
