@@ -129,7 +129,11 @@ export default function NieuweOefeningenScreen() {
             if (result.subtitle) setSubtitle(result.subtitle);
             if (result.explanation) setExplanation(result.explanation);
             if (result.instructions) setInstructions(result.instructions);
-            setBoardLayout(result.board_layout);
+            setBoardLayout({
+                ...result.board_layout,
+                backgroundImageUrl: importPhoto.uri,
+                backgroundOpacity: 0.65,
+            });
             setBoardVersion((version) => version + 1);
             if (!result.board_layout.items.length) {
                 setImportError("Geen herkenbare tekenobjecten gevonden. Je kunt de foto wel rechtstreeks opslaan.");
@@ -215,7 +219,10 @@ export default function NieuweOefeningenScreen() {
                     build_up: buildUp.trim() || null,
                     difficulty,
                     audience: selectedAudiences,
-                    board_layout: hasBoardItems ? boardLayout : null,
+                    board_layout: hasBoardItems ? {
+                        ...boardLayout,
+                        backgroundImageUrl: importPhoto && importMode === "ai" ? savedImageUrl : boardLayout.backgroundImageUrl,
+                    } : null,
                 })
                 .select("id")
                 .single();
