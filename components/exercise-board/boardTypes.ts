@@ -35,7 +35,9 @@ export type RenderItemType =
     | "goal"
     | "runLine"
     | "passLine"
-    | "guideLine";
+    | "guideLine"
+    | "player"
+    | "text";
 
 export type PlaceableToolType = Exclude<
     ToolType,
@@ -60,6 +62,12 @@ export type BoardItem = {
     color?: HatColor;
     rotation?: number;
     lineStyle?: LineStyle;
+    shirtColor?: "black" | "orange" | "blue" | "grey" | "white" | "red" | "green";
+    label?: string;
+    text?: string;
+    strokeColor?: string;
+    dashed?: boolean;
+    arrowHead?: boolean;
 };
 
 export type ExerciseBoardLayout = {
