@@ -59,7 +59,19 @@ export async function analyzeExercisePhoto(photo: SelectedExercisePhoto): Promis
     const { data, error } = await supabase.functions.invoke("analyze-exercise-photo", {
         body: { mimeType: photo.mimeType, base64: photo.base64 },
     });
-    if (error) throw new Error("AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed.");
+    if (error) {
+        let message = "AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed en OPENAI_API_KEY is ingesteld.";
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+            try {
+                const body = await response.json();
+                if (typeof body?.error === "string") message = body.error;
+            } catch {
+                // Keep the fallback message when the server did not return JSON.
+            }
+        }
+        throw new Error(message);
+    }
     if (!data || typeof data !== "object" || data.error) {
         throw new Error(data?.error || "AI-analyse mislukt.");
     }
