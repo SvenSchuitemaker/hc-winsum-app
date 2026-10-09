@@ -31,7 +31,8 @@ export default function BoardItemOverlay({
     onSelect,
     label,
 }: Props) {
-    const itemSize = 22;
+    const isText = item.type === "text";
+    const itemSize = isText ? 72 : 22;
     const halfItemSize = itemSize / 2;
     const left = item.x * boardWidth;
     const top = item.y * boardHeight;
@@ -45,11 +46,19 @@ export default function BoardItemOverlay({
                     left: left - halfItemSize,
                     top: top - halfItemSize,
                     borderColor: selected ? COLORS.primary : "transparent",
+                    width: itemSize,
+                    height: isText ? 30 : 22,
                 },
             ]}
             pointerEvents={isSelectMode ? "auto" : "none"}
         >
-            <Pressable onPress={onSelect} hitSlop={12} style={styles.itemInner}>
+            <Pressable onPress={onSelect} hitSlop={12} style={[styles.itemInner, isText && { width: 72, height: 30 }]}> 
+                {item.type === "text" && <Text numberOfLines={2} style={{ color: "#FFFFFF", fontSize: 10, textAlign: "center", fontWeight: "700" }}>{item.text}</Text>}
+                {item.type === "player" && (
+                    <View style={[styles.playerWrap, { backgroundColor: ({ black: "#171717", orange: "#F39A25", blue: "#199ED8", grey: "#A5A5A5", white: "#F5F5F5", red: "#D93945", green: "#2EAD72" } as Record<string,string>)[item.shirtColor ?? "blue"] }] }>
+                        <Text style={[styles.playerText, item.shirtColor === "white" && { color: "#111111" }]}>{item.label ?? ""}</Text>
+                    </View>
+                )}
                 {item.type === "cone" && <View style={styles.cone} />}
 
                 {item.type === "hat" && (

@@ -94,7 +94,7 @@ export default function ExerciseBoardCanvas({
                             );
                         }
 
-                        const stroke = item.type === "runLine" ? "#FFD166" : "#6EC6FF";
+                        const stroke = item.strokeColor ?? (item.type === "runLine" ? "#FFD166" : "#6EC6FF");
 
                         if (item.type === "runLine" && item.lineStyle === "zigzag") {
                             const zigzagPath = getZigzagRunPath(x1, y1, x2, y2);
@@ -244,14 +244,14 @@ export default function ExerciseBoardCanvas({
                                     y2={y2}
                                     stroke={stroke}
                                     strokeWidth={selected ? "1.2" : "0.8"}
-                                    strokeDasharray={item.type === "passLine" ? "3 2" : undefined}
+                                    strokeDasharray={item.dashed ? "3 2" : item.type === "passLine" && item.dashed !== false ? "3 2" : undefined}
                                 />
-                                <Path
+                                {item.arrowHead !== false && <Path
                                     d={getArrowHeadPath(x1, y1, x2, y2)}
                                     stroke={stroke}
                                     strokeWidth={selected ? "1" : "0.6"}
                                     fill="none"
-                                />
+                                />}
                             </G>
                         );
                     })}
