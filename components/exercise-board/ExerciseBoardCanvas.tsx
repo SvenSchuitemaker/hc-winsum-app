@@ -54,9 +54,10 @@ export default function ExerciseBoardCanvas({
         <View ref={captureTargetRef} collapsable={false}>
             <View style={boardStyle} onLayout={onLayout} {...panHandlers}>
                 <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    {backgroundImageUrl && showBackground ? (
+                    {renderHalfField()}
+                    {backgroundImageUrl && showBackground && (
                         <SvgImage href={{ uri: backgroundImageUrl }} x="0" y="0" width="100" height="100" opacity={backgroundOpacity} preserveAspectRatio="none" />
-                    ) : renderHalfField()}
+                    )}
 
                     {lineItems.map((item: BoardItem) => {
                         const x1 = item.x * 100;

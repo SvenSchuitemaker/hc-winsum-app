@@ -56,7 +56,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
         const [items, setItems] = useState(initialLayoutRef.current.items);
         const [backgroundImageUrl, setBackgroundImageUrl] = useState(initialLayoutRef.current.backgroundImageUrl);
         const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
-        const [showBackground, setShowBackground] = useState(true);
+        const [showBackground, setShowBackground] = useState(false);
         const [selectedTool, setSelectedTool] = useState<ToolType>("select");
         const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
         const [boardSize, setBoardSize] = useState({ width: 1, height: 1 });
@@ -393,7 +393,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                     {!!backgroundImageUrl && (
                         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
                             <Pressable onPress={() => setShowBackground((current) => !current)} style={styles.toolButton}>
-                                <Text style={styles.toolText}>{showBackground ? "Verberg referentiefoto" : "Toon referentiefoto"}</Text>
+                                <Text style={styles.toolText}>{showBackground ? "Klaar met overtrekken" : "Toon foto om bij te stellen"}</Text>
                             </Pressable>
                             <Pressable onPress={() => setBackgroundOpacity((current) => Math.max(0.2, Math.round((current - 0.1) * 10) / 10))} style={styles.toolButton}>
                                 <Text style={styles.toolText}>−</Text>

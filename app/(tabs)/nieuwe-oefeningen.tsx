@@ -221,7 +221,8 @@ export default function NieuweOefeningenScreen() {
                     audience: selectedAudiences,
                     board_layout: hasBoardItems ? {
                         ...boardLayout,
-                        backgroundImageUrl: importPhoto && importMode === "ai" ? savedImageUrl : boardLayout.backgroundImageUrl,
+                        // The photo is only a temporary alignment aid, never part of the final board.
+                        backgroundImageUrl: importPhoto && importMode === "ai" ? null : boardLayout.backgroundImageUrl,
                     } : null,
                 })
                 .select("id")
