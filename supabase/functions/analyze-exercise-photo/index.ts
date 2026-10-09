@@ -239,7 +239,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const arrowItems = await analyzeArrows(key, visionModel, mimeType, base64);
     const visualItems = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type))) : [];
-    const normalized = normalizedItems([...visualItems, ...arrowItems], calibration);
+    const fallbackArrows = Array.isArray(parsed.items)
+      ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
+    const normalized = normalizedItems([...visualItems, ...(arrowItems.length ? arrowItems : fallbackArrows)], calibration);
     const uniqueItems = deduplicateDetections(normalized);
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
