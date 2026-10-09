@@ -360,6 +360,30 @@ function anchorSupportLabels(items: Array<Record<string, unknown>>) {
   });
 }
 
+function normalizeTrainerObjects(items: Array<Record<string, unknown>>) {
+  // The same coach is sometimes detected as a grey jersey and an extra T-circle.
+  // Merge only nearby T detections; do not move numbered black/orange players.
+  const greys = items.filter((item) => item.type === "player" &&
+    item.shirtColor === "grey");
+  if (!greys.length) return items;
+  const removed = new Set<Record<string, unknown>>();
+  const occupied = new Set<Record<string, unknown>>();
+  for (const item of items) {
+    if (item.type !== "trainer" &&
+      !(item.type === "player" && String(item.label).trim().toUpperCase() === "T" && item.shirtColor !== "grey")) continue;
+    const nearest = greys.map((grey) => ({
+      grey,
+      distance: Math.hypot(Number(grey.x) - Number(item.x), Number(grey.y) - Number(item.y)),
+    })).sort((a, b) => a.distance - b.distance)
+      .find(({ grey }) => !occupied.has(grey));
+    if (!nearest || nearest.distance > 0.06) continue;
+    if (!String(nearest.grey.label ?? "").trim()) nearest.grey.label = "T";
+    occupied.add(nearest.grey);
+    removed.add(item);
+  }
+  return items.filter((item) => !removed.has(item));
+}
+
 function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
   const players = items.filter((item) => item.type === "player" || item.type === "trainer" ||
     item.type === "attacker" || item.type === "defender");
@@ -489,9 +513,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(applyDiagramConstraints(deduplicateDetections(
+    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
       anchorPixelPlayers(normalized, body?.detectedPlayers, calibration),
-    ))));
+    )))));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
