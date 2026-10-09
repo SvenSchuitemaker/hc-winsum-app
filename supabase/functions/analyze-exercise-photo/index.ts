@@ -360,61 +360,94 @@ function applyDiagramConstraints(items: Array<Record<string, unknown>>) {
 }
 
 
-function anchorPixelPlayers(items: Array<Record<string, unknown>>, pixels: unknown, calibration: FieldCalibration) {
+function anchorPixelPlayers(
+  items: Array<Record<string, unknown>>,
+  pixels: unknown,
+  calibration: FieldCalibration,
+  jerseyAudit: unknown[] = [],
+) {
   if (!Array.isArray(pixels) || pixels.length > 80) return items;
   const candidates = pixels.flatMap((raw: unknown) => {
     if (!raw || typeof raw !== "object") return [];
     const p = raw as Record<string, unknown>;
     const color = String(p.shirtColor);
     if (!["black", "orange", "blue", "grey"].includes(color) ||
-        typeof p.x !== "number" || typeof p.y !== "number" ||
-        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
-        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+      typeof p.x !== "number" || typeof p.y !== "number" ||
+      !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+      p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
     return [{ ...calibratedPoint(p.x, p.y, calibration), shirtColor: color }];
   });
   const updated = items.map((item) => ({ ...item }));
-  // Only accept a mutual nearest-neighbour match. Earlier greedy matching could
-  // move player #1 onto shirt #3's pixels and shift the rest of a formation.
-  // A pixel component near a line, jersey number or cone is not automatically
-  // a reliable player detection.
-  const claim = (item: Record<string, unknown>, allowed: string[], radius: number) => {
-    const matching = candidates.map((candidate, index) => ({
-      candidate, index,
-      distance: Math.hypot(Number(item.x) - candidate.x, Number(item.y) - candidate.y),
-    })).filter(({ candidate, distance }) => allowed.includes(candidate.shirtColor) && distance <= radius)
-      .sort((a, b) => a.distance - b.distance);
-    if (!matching.length) return null;
-    // Avoid ambiguous pixel candidates sitting between two nearby players.
-    if (matching.length > 1 && matching[1].distance - matching[0].distance < 0.025) return null;
-    const closest = matching[0];
-    const competing = updated.filter((other) =>
-      other !== item && other.type === "player" &&
-      other.shirtColor === closest.candidate.shirtColor &&
-      Math.hypot(Number(other.x) - closest.candidate.x,
-        Number(other.y) - closest.candidate.y) <= closest.distance + 0.012);
-    if (competing.length) return null;
-    return closest;
+  const players = updated.filter((item) => item.type === "player");
+  const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+  // Audit-derived labels are only evidence for an EXISTING jersey identity.
+  // They must not create, renumber or reposition a player on their own.
+  const audited = (Array.isArray(jerseyAudit) ? jerseyAudit : []).flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const r = raw as Record<string, unknown>;
+    const color = String(r.shirtColor ?? "").toLowerCase();
+    const label = String(r.label ?? "").trim().toUpperCase();
+    if (!["black", "orange", "blue", "grey"].includes(color) ||
+      !/^(?:[1-9][0-9]?|T)$/.test(label) ||
+      typeof r.x !== "number" || typeof r.y !== "number" ||
+      !Number.isFinite(r.x) || !Number.isFinite(r.y) ||
+      r.x < 0 || r.x > 1 || r.y < 0 || r.y > 1) return [];
+    return [{ ...calibratedPoint(r.x, r.y, calibration), shirtColor: color, label }];
+  });
+  // Each numbered jersey must be independently unique in the OCR pass.
+  const supportsExtendedSnap = (player: Record<string, unknown>, candidate: Point) => {
+    const label = String(player.label ?? "").trim().toUpperCase();
+    if (!label) return false;
+    const identity = audited.filter((a) =>
+      a.shirtColor === player.shirtColor && a.label === label);
+    if (identity.length !== 1 || distance(identity[0], candidate) > 0.028) return false;
+    // OCR must also agree with the ORIGINAL player position. This avoids
+    // using a mistakenly read number to swap two similarly colored jerseys.
+    if (distance(identity[0], { x: Number(player.x), y: Number(player.y) }) > 0.075) return false;
+    return audited.filter((a) => a.shirtColor === player.shirtColor &&
+      distance(a, candidate) <= 0.028).length === 1;
   };
   const used = new Set<number>();
-  // Preserve the label and color on every numbered jersey. Only refine a
-  // confidently matched center, not the identities or ordering.
-  const players = updated.filter((item) => item.type === "player");
-  for (const item of players) {
-    const color = String(item.shirtColor ?? "");
-    const match = claim(item, [color], 0.035);
-    if (!match || used.has(match.index)) continue;
-    item.x = match.candidate.x;
-    item.y = match.candidate.y;
+  // Nearest-neighbour in BOTH directions, with a separation margin.
+  // Never greedily claim a candidate and shift an adjacent numbered player.
+  const claim = (item: Record<string, unknown>, allowed: string[], radius: number) => {
+    const origin = { x: Number(item.x), y: Number(item.y) };
+    const matching = candidates.map((candidate, index) => ({
+      candidate, index, distance: distance(origin, candidate),
+    })).filter(({ candidate, distance: d }) => allowed.includes(candidate.shirtColor) && d <= radius)
+      .sort((a, b) => a.distance - b.distance);
+    if (!matching.length || used.has(matching[0].index)) return null;
+    if (matching.length > 1 && matching[1].distance - matching[0].distance < 0.025) return null;
+    const closest = matching[0];
+    const rivals = players.filter((other) => other !== item &&
+      other.shirtColor === closest.candidate.shirtColor)
+      .map((other) => distance({ x: Number(other.x), y: Number(other.y) }, closest.candidate));
+    if (rivals.some((d) => d <= closest.distance + 0.015)) return null;
+    // A pixel component alone is not sufficient evidence for a large move.
+    if (closest.distance > 0.035 && !supportsExtendedSnap(item, closest.candidate)) return null;
+    return closest;
+  };
+  // Assign more certain, shorter matches first, independent of source order.
+  const ordered = players.map((player) => ({
+    player,
+    closest: candidates.filter((c) => c.shirtColor === player.shirtColor)
+      .reduce((best, c) => Math.min(best,
+        distance({ x: Number(player.x), y: Number(player.y) }, c)), Infinity),
+  })).sort((a, b) => a.closest - b.closest);
+  for (const { player } of ordered) {
+    const match = claim(player, [String(player.shirtColor ?? "")], 0.065);
+    if (!match) continue;
+    player.x = match.candidate.x;
+    player.y = match.candidate.y;
     used.add(match.index);
   }
-  // Legacy circle conversion remains possible, but never at the cost of
-  // inventing jersey numbers or moving a previously recognized player.
+  // Preserve legacy conversion, but only for very close unclaimed candidates.
   for (const item of updated) {
     if (!["attacker", "defender", "trainer"].includes(String(item.type))) continue;
     const allowed = item.type === "trainer" ? ["grey"] :
       item.type === "defender" ? ["black"] : ["blue", "orange"];
     const match = claim(item, allowed, 0.025);
-    if (!match || used.has(match.index)) continue;
+    if (!match) continue;
     const wasTrainer = item.type === "trainer";
     item.type = "player";
     item.shirtColor = match.candidate.shirtColor;
@@ -616,7 +649,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       calibration,
     );
     const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
-      auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration), jerseyAudit, calibration),
+      auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
     )))));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
