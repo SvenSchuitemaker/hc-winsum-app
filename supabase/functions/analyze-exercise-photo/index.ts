@@ -214,6 +214,95 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
   } catch { return []; }
 }
 
+
+/**
+ * Independently read visible jersey numbers AFTER the geometry pass. This
+ * stage is advisory: it must never create a player or move a pixel anchor.
+ * A failed audit leaves the original reconstruction intact.
+ */
+async function analyzeJerseyLabels(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "Inspect ONLY actual field hockey JERSEY icons and the numbers printed INSIDE them. Return JSON {shirts:[{x,y,shirtColor,label}]} where x,y are centers normalized to the ENTIRE ORIGINAL IMAGE. shirtColor must be black, orange, blue, grey, white, red or green. label must be a clearly readable number (1-99) or T; otherwise use an empty string. Do not treat colored circles, arrows, text captions, cones, field markings, or goals as shirts. Do not guess occluded or unclear numbers. Include each real jersey once. Accuracy and faithful spatial locations matter more than producing many results." },
+        { role: "user", content: [
+          { type: "text", text: "Verify the printed numbers and centers of visible jersey-shaped icons only. Do not infer identities or positions from the drill." },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ] },
+      ],
+    }),
+  });
+  if (!response.ok) return [];
+  const result = await response.json();
+  try {
+    const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.shirts) ? parsed.shirts.slice(0, 80) : [];
+  } catch { return []; }
+}
+
+/**
+ * Only adopt independently verified labels where both passes agree on the
+ * shirt's color and unique nearest location. Never overwrite a conflicting
+ * existing label; this prevents second-pass OCR errors from swapping players.
+ */
+function auditJerseyLabels(items: Array<Record<string, unknown>>, raw: unknown[], calibration: FieldCalibration) {
+  const players = items.filter((item) => item.type === "player");
+  if (!players.length || !raw.length || raw.length > 80) return items;
+  const candidates = raw.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const shirt = value as Record<string, unknown>;
+    const shirtColor = String(shirt.shirtColor || "").toLowerCase();
+    const label = String(shirt.label ?? "").trim().toUpperCase();
+    if (!["black", "orange", "blue", "grey", "white", "red", "green"].includes(shirtColor) ||
+      !/^(?:[1-9][0-9]?|T)$/.test(label) ||
+      typeof shirt.x !== "number" || typeof shirt.y !== "number" ||
+      !Number.isFinite(shirt.x) || !Number.isFinite(shirt.y) ||
+      shirt.x < 0 || shirt.x > 1 || shirt.y < 0 || shirt.y > 1) return [];
+    return [{ ...calibratedPoint(shirt.x, shirt.y, calibration), shirtColor, label }];
+  });
+  // Two detections of the same color/number mean the audit cannot uniquely
+  // identify that jersey; ignore both rather than risk a swap.
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const key = `${candidate.shirtColor}:${candidate.label}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const proposed = new Map<Record<string, unknown>, string>();
+  const used = new Set<Record<string, unknown>>();
+  for (const candidate of candidates) {
+    if (counts.get(`${candidate.shirtColor}:${candidate.label}`) !== 1) continue;
+    const matches = players
+      .filter((player) => player.shirtColor === candidate.shirtColor)
+      .map((player) => ({ player, distance: Math.hypot(Number(player.x) - candidate.x, Number(player.y) - candidate.y) }))
+      .sort((a, b) => a.distance - b.distance);
+    if (!matches.length || matches[0].distance > 0.045 ||
+      (matches[1] && matches[1].distance - matches[0].distance < 0.025)) continue;
+    const player = matches[0].player;
+    // A competing audit result too close to this same player is ambiguous.
+    const rivals = candidates.filter((other) => other !== candidate &&
+      other.shirtColor === candidate.shirtColor &&
+      Math.hypot(Number(player.x) - other.x, Number(player.y) - other.y) <= matches[0].distance + 0.012);
+    if (rivals.length || used.has(player)) continue;
+    const currentLabel = String(player.label || "").trim().toUpperCase();
+    if (currentLabel && currentLabel !== candidate.label) continue;
+    proposed.set(player, candidate.label);
+    used.add(player);
+  }
+  // Do not introduce duplicate labels within a shirt color.
+  for (const [player, label] of proposed) {
+    if (players.some((other) => other !== player &&
+      other.shirtColor === player.shirtColor &&
+      String(other.label || "").trim().toUpperCase() === label)) continue;
+    player.label = label;
+  }
+  return items;
+}
+
 function deduplicateDetections(items: Array<Record<string, unknown>>) {
   // Treat adjacent detections of the same shirt as distinct when they have
   // different printed numbers; remove only near-identical duplicates.
@@ -487,6 +576,14 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const result = await response.json();
     const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
     const calibration = parseCalibration(parsed.calibration);
+    // Dedicated, optional number-reading pass. Keep the original import if
+    // the provider fails or returns ambiguous labels.
+    let jerseyAudit: unknown[] = [];
+    try {
+      jerseyAudit = await analyzeJerseyLabels(key!, visionModel, mimeType, base64);
+    } catch {
+      // Never fail the import because of the optional jersey audit.
+    }
     // The initial pass finds jerseys/cones/text and calibrates the field. Trace arrows
     // separately to avoid a common failure mode where players are connected arbitrarily.
     let arrowItems: unknown[] = [];
@@ -519,7 +616,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       calibration,
     );
     const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
-      anchorPixelPlayers(normalized, body?.detectedPlayers, calibration),
+      auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration), jerseyAudit, calibration),
     )))));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
