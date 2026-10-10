@@ -539,6 +539,76 @@ function normalizeGreyTeamPlayers(items: Array<Record<string, unknown>>) {
   });
 }
 
+// Recover a missing jersey ONLY when an independent jersey-number pass and
+// image pixel detection agree on a unique center. Never infer a team roster,
+// create a trainer, or move/overwrite an existing shirt.
+function recoverVerifiedJerseys(
+  items: Array<Record<string, unknown>>,
+  rawAudit: unknown[],
+  rawPixels: unknown,
+  calibration: FieldCalibration,
+) {
+  if (!Array.isArray(rawPixels) || rawPixels.length > 80 || !Array.isArray(rawAudit)) return items;
+  const colorOf = (value: unknown) => {
+    const color = String(value ?? "").toLowerCase();
+    return color === "grey" ? "black" : color;
+  };
+  const pixels = rawPixels.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const p = raw as Record<string, unknown>;
+    if (!["black", "grey", "orange", "blue"].includes(String(p.shirtColor)) ||
+        typeof p.x !== "number" || typeof p.y !== "number" ||
+        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+    return [{ ...calibratedPoint(p.x, p.y, calibration), color: colorOf(p.shirtColor) }];
+  });
+  const audit = rawAudit.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const p = raw as Record<string, unknown>;
+    const label = String(p.label ?? "").trim().toUpperCase();
+    const color = colorOf(p.shirtColor);
+    if (!["black", "orange", "blue"].includes(color) ||
+        !/^[1-9][0-9]?$/.test(label) ||
+        typeof p.x !== "number" || typeof p.y !== "number" ||
+        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+    return [{ ...calibratedPoint(p.x, p.y, calibration), color, label }];
+  });
+  const players = items.filter((i) => i.type === "player");
+  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+  const added: Array<Record<string, unknown>> = [];
+  const usedPixels = new Set<number>();
+  for (const shirt of audit) {
+    // Multiple OCR reads of one identity are ambiguous, not evidence of
+    // multiple players. Reject them rather than guessing.
+    if (audit.filter((a) => a.color === shirt.color && a.label === shirt.label).length !== 1) continue;
+    if (players.some((p) => colorOf(p.shirtColor) === shirt.color &&
+        String(p.label ?? "").trim().toUpperCase() === shirt.label)) continue;
+    // Existing unnumbered/differently numbered players may represent the same
+    // jersey; never add another object at nearly the same location.
+    if (players.some((p) => distance({ x: Number(p.x), y: Number(p.y) }, shirt) < 0.055)) continue;
+    const neighbors = pixels.map((p, index) => ({ ...p, index, distance: distance(p, shirt) }))
+      .filter((p) => p.color === shirt.color && p.distance <= 0.025)
+      .sort((a, b) => a.distance - b.distance);
+    if (neighbors.length !== 1 || usedPixels.has(neighbors[0].index)) continue;
+    const pixel = neighbors[0];
+    // A pixel component must not belong to a different OCR shirt.
+    if (audit.some((a) => a !== shirt && a.color === shirt.color &&
+        distance(a, pixel) <= pixel.distance + 0.015)) continue;
+    if (added.some((a) => distance({ x: Number(a.x), y: Number(a.y) }, pixel) < 0.055)) continue;
+    usedPixels.add(pixel.index);
+    added.push({
+      id: `import-recovered-${items.length + added.length}`,
+      type: "player",
+      x: pixel.x, y: pixel.y,
+      shirtColor: shirt.color,
+      label: shirt.label,
+    });
+  }
+  return [...items, ...added];
+}
+
 function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
   const players = items.filter((item) => item.type === "player" || item.type === "trainer" ||
     item.type === "attacker" || item.type === "defender");
@@ -676,9 +746,12 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
-      auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
-    ))))));
+    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(recoverVerifiedJerseys(
+      normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
+        auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
+      )))),
+      jerseyAudit, body?.detectedPlayers, calibration,
+    )));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
