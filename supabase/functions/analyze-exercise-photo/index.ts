@@ -871,7 +871,66 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       : Array.isArray(parsed.items)
         ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
         : [];
-    const sourceObjects = [...physicalSource, ...sourceArrows];
+
+    // Image-pixel centers can correct approximate AI geometry, but must NEVER
+    // change the inventory count, identity or color. Match in ORIGINAL image
+    // coordinates before applying the ONE shared field transform.
+    type PixelAnchor = { x: number; y: number; shirtColor?: string };
+    const validAnchors = (raw: unknown): PixelAnchor[] =>
+      Array.isArray(raw) && raw.length <= 120 ? raw.flatMap((v) => {
+        if (!v || typeof v !== "object") return [];
+        const p = v as Record<string, unknown>;
+        return typeof p.x === "number" && typeof p.y === "number" &&
+          p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1
+          ? [{ x: p.x, y: p.y, shirtColor: String(p.shirtColor ?? "") }] : [];
+      }) : [];
+    const coneAnchors = validAnchors(body?.detectedCones);
+    const playerAnchors = validAnchors(body?.detectedPlayers);
+    const anchorObjects = (values: unknown[], type: string, anchors: PixelAnchor[]) => {
+      const updated = [...values];
+      const entries = values.flatMap((value, index) => {
+        if (!value || typeof value !== "object") return [];
+        const item = value as Record<string, unknown>;
+        if (item.type !== type || !Number.isFinite(Number(item.x)) ||
+          !Number.isFinite(Number(item.y))) return [];
+        return [{ index, item }];
+      });
+      if (!entries.length || !anchors.length) return updated;
+      // Protect the inventory against false-positive pixel components.
+      // An equal count for each shirt color is required before pixel anchors
+      // replace player positions. For cones use exact inventory counts.
+      const groups = type === "player"
+        ? ["black", "grey", "orange", "blue", "white", "red", "green"] : [""];
+      for (const color of groups) {
+        const entryGroup = entries.filter(({ item }) => type !== "player" ||
+          String(item.shirtColor ?? "").toLowerCase() === color);
+        const pixelGroup = anchors.filter((p) => type !== "player" || p.shirtColor === color);
+        if (!entryGroup.length || entryGroup.length !== pixelGroup.length) continue;
+        // Minimum-total-distance bijection: assign every pixel to one item.
+        // Sorted candidate pairs prevent two nearby shirts sharing an anchor.
+        const pairs = entryGroup.flatMap(({ index, item }) => pixelGroup.map((p, pixelIndex) => ({
+          index, pixelIndex, p,
+          distance: Math.hypot(Number(item.x) - p.x, Number(item.y) - p.y),
+        }))).sort((a, b) => a.distance - b.distance);
+        const usedEntries = new Set<number>(), usedPixels = new Set<number>();
+        for (const match of pairs) {
+          if (usedEntries.has(match.index) || usedPixels.has(match.pixelIndex)) continue;
+          if (match.distance > 0.32) continue; // Never move across unrelated field regions.
+          updated[match.index] = {
+            ...(updated[match.index] as Record<string, unknown>),
+            x: match.p.x, y: match.p.y,
+          };
+          usedEntries.add(match.index);
+          usedPixels.add(match.pixelIndex);
+        }
+      }
+      return updated;
+    };
+    const pixelAnchored = anchorObjects(
+      anchorObjects(physicalSource, "cone", coneAnchors),
+      "player", playerAnchors,
+    );
+    const sourceObjects = [...pixelAnchored, ...sourceArrows];
     const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
       // Grey playing jerseys are displayed as black; retain grey coach T.
       if (item.type === "player" && item.shirtColor === "grey" &&
