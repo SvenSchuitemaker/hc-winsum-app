@@ -804,10 +804,10 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     } catch {
       // An unavailable inventory pass must not break normal imports.
     }
-    const visualItems = (inventoryItems?.length ? inventoryItems : parsed.items) instanceof Array
-      ? (inventoryItems?.length ? inventoryItems : parsed.items).filter(
-          (item: Record<string, unknown>) => !lineTypes.has(String(item?.type))
-        ) : [];
+    const sourceVisualItems: unknown = inventoryItems?.length ? inventoryItems : parsed.items;
+    const visualItems = Array.isArray(sourceVisualItems)
+      ? sourceVisualItems.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type)))
+      : [];
     const fallbackArrows = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
     // Use original image pixels for cone centers when web-side detection succeeds.
