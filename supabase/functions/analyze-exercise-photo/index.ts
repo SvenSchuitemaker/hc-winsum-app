@@ -188,6 +188,32 @@ function normalizedItems(items: unknown, calibration: FieldCalibration) {
   });
 }
 
+// Separate inventory pass: count every actual visible object before the
+// normal coordinate/label alignment. A list entry is one physical object,
+// including adjacent/overlapping shirts. No expected team sizes are assumed.
+async function analyzeObjectInventory(key: string, model: string, mimeType: string, base64: string): Promise<unknown[] | null> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model, temperature: 0, response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `Inventory a field hockey drill image BEFORE drawing it. Return JSON {"objects":[{"type":"player","x":0.5,"y":0.5,"shirtColor":"black","label":"1"},...]}. Each entry represents one and ONLY one visible physical object. Enumerate ALL shirts individually, even when their icons touch or overlap, in careful top-to-bottom order; never straighten rows, change spacing or invent players to complete teams. Every shirt has type player and shirtColor black/orange/blue/grey/white/red/green, and printed label (number, T, or "" if unreadable). Trainer T is a separate grey shirt. Count each genuine cone, ball, disc/hat, goal and written text separately too (type cone/ball/hat/goal/text; for text include "text" exactly as shown). Objects use centers in normalized FULL SOURCE IMAGE coordinates 0..1 with three decimals. Keep overlapping objects with different centers or identities; do not collapse close teammates. Ignore printed white field markings, field lines, arrows, borders, background artwork and screenshot interface elements. Pass and run arrows are traced in a separate pass, do not include arrows here. Only return objects that actually appear, irrespective of the specific exercise formation. Output no additional commentary.` },
+        { role: "user", content: [
+          { type: "text", text: "First count every distinct physical object, then return the complete one-object-per-entry inventory at its actual pixel center. Do not omit nearby or overlapping shirts." },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ] },
+      ],
+    }),
+  });
+  if (!response.ok) return null;
+  try {
+    const result = await response.json();
+    const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.objects) && parsed.objects.length <= 120 ? parsed.objects : null;
+  } catch { return null; }
+}
+
 // A second, focused vision pass avoids confusing exercise arrows with field markings.
 async function analyzeArrows(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -320,9 +346,12 @@ function deduplicateDetections(items: Array<Record<string, unknown>>) {
         return String(item.text).trim().toLowerCase() === String(previous.text).trim().toLowerCase()
           && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.075;
       }
+      // Overlapping shirt icons can be separate people. Only remove almost
+      // identical SAME-identity detections; never dedupe by proximity alone.
+      const threshold = item.type === "player" ? 0.007 : 0.018;
       return item.type === previous.type && item.label === previous.label
         && item.shirtColor === previous.shirtColor
-        && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.018;
+        && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < threshold;
     })) continue;
     seen.push(item);
   }
@@ -594,6 +623,7 @@ function recoverVerifiedJerseys(
         distance(a, best) <= best.distance + 0.015)) continue;
     // Only reject a physical collision, not simply a nearby different shirt.
     if (players.some((p) => normalizedJerseyColor(p.shirtColor) === shirt.color &&
+        String(p.label ?? "").trim().toUpperCase() === shirt.label &&
         distance({ x: Number(p.x), y: Number(p.y) }, best) < 0.022)) continue;
     const recovered: Record<string, unknown> = {
       id: `import-recovered-${items.length + result.length}`,
@@ -771,8 +801,18 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     } catch {
       // A transient second-pass failure must not discard a successful first pass.
     }
-    const visualItems = Array.isArray(parsed.items)
-      ? parsed.items.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type))) : [];
+    // Prefer a dedicated inventory that explicitly counts all individual
+    // objects. If that optional pass fails, retain the original vision result.
+    let inventoryItems: unknown[] | null = null;
+    try {
+      inventoryItems = await analyzeObjectInventory(key!, visionModel, mimeType, base64);
+    } catch {
+      // An unavailable inventory pass must not break normal imports.
+    }
+    const sourceVisualItems: unknown = inventoryItems?.length ? inventoryItems : parsed.items;
+    const visualItems = Array.isArray(sourceVisualItems)
+      ? sourceVisualItems.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type)))
+      : [];
     const fallbackArrows = Array.isArray(parsed.items)
       ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
     // Use original image pixels for cone centers when web-side detection succeeds.
