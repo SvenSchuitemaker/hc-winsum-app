@@ -57,6 +57,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
         const [items, setItems] = useState(initialLayoutRef.current.items);
         const [backgroundImageUrl, setBackgroundImageUrl] = useState(initialLayoutRef.current.backgroundImageUrl);
         const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
+        const [backgroundCalibration, setBackgroundCalibration] = useState(initialLayoutRef.current.backgroundCalibration);
         const [showBackground, setShowBackground] = useState(false);
         const [selectedTool, setSelectedTool] = useState<ToolType>("select");
         const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -106,12 +107,13 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             setBackgroundImageUrl(next.backgroundImageUrl);
             setFieldOrientation(next.fieldOrientation === "top" ? "top" : "right");
             setBackgroundOpacity(next.backgroundOpacity ?? 0.65);
+            setBackgroundCalibration(next.backgroundCalibration);
             hydratedFromPropsRef.current = true;
         }, [value]);
 
         useEffect(() => {
-            onChange?.({ fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity });
-        }, [fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity, onChange]);
+            onChange?.({ fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity, backgroundCalibration });
+        }, [fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity, backgroundCalibration, onChange]);
 
         const itemLabels = useMemo(() => buildItemLabels(items), [items]);
 
