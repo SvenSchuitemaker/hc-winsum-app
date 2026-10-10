@@ -18,6 +18,13 @@ export function clamp(value: number, min: number, max: number) {
 }
 
 export function sanitizeItem(item: BoardItem): BoardItem {
+    // AI-imported jerseys retain import-* IDs; do not change manual jerseys.
+    if (item.type === "player" && item.id.startsWith("import-") &&
+        item.shirtColor === "grey" &&
+        String(item.label ?? "").trim().toUpperCase() !== "T") {
+        return { ...item, shirtColor: "black" };
+    }
+
     if (item.type === "hat") {
         return {
             ...item,
