@@ -926,10 +926,21 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }
       return updated;
     };
-    const pixelAnchored = anchorObjects(
-      anchorObjects(physicalSource, "cone", coneAnchors),
-      "player", playerAnchors,
-    );
+    // Red cones are small, high-contrast symbols. When the pixel detector
+    // returns a credible set, use its actual measured positions and COUNT,
+    // not an AI-inferred cone formation. Never mix fake AI cones into that set.
+    const conePixelsCredible = coneAnchors.length >= 3 && coneAnchors.length <= 60 &&
+      coneAnchors.every((p, i) => coneAnchors.every((q, j) => i === j ||
+        Math.hypot(p.x - q.x, p.y - q.y) > 0.008));
+    const reliablePhysical = conePixelsCredible
+      ? [
+          ...physicalSource.filter((obj) => (obj as Record<string, unknown>).type !== "cone"),
+          ...coneAnchors.map((p) => ({ type: "cone", x: p.x, y: p.y })),
+        ]
+      : physicalSource;
+    // The color-based shirt detector is advisory. Only replace a shirt center
+    // when the same-color inventory and detected pixel count agree.
+    const pixelAnchored = anchorObjects(reliablePhysical, "player", playerAnchors);
     const sourceObjects = [...pixelAnchored, ...sourceArrows];
     const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
       // Grey playing jerseys are displayed as black; retain grey coach T.
@@ -947,10 +958,11 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }
       return counts;
     };
-    const inventoryCounts = countTypes(physicalSource as Array<Record<string, unknown>>);
+    const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
     if (!inventoryItems?.length) warnings.push("Aparte inventarisatie niet beschikbaar: controleer de aantallen.");
+    if (conePixelsCredible && coneAnchors.length !== physicalSource.filter((obj) => (obj as Record<string, unknown>).type === "cone").length) warnings.push("Aantal AI-pylonnen wijkt af van de gemeten foto: de fotopixels zijn gebruikt.");
     for (const [type, count] of Object.entries(inventoryCounts)) {
       if ((outputCounts[type] || 0) < count) warnings.push(`Niet alle herkende ${type}-objecten zijn geplaatst.`);
     }
