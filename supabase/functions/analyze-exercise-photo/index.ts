@@ -133,7 +133,9 @@ function inverseFieldQuad(point: Point, corners: NonNullable<FieldCalibration["c
 
 function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
   const { left, right, top, bottom } = calibration.bounds;
-  const candidate = calibration.corners ? inverseFieldQuad({ x, y }, calibration.corners) : null;
+  // The overlay uses this same rectangular crop transform. Perspective corner
+  // estimates are not applied independently until the overlay can warp too.
+  const candidate = null as Point | null;
   const corrected = candidate && candidate.x >= -0.08 && candidate.x <= 1.08 &&
     candidate.y >= -0.08 && candidate.y <= 1.08 ? candidate : null;
   const u = corrected?.x ?? (x - left) / (right - left);
