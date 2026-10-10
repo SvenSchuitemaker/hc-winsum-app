@@ -133,7 +133,9 @@ function inverseFieldQuad(point: Point, corners: NonNullable<FieldCalibration["c
 
 function calibratedPoint(x: number, y: number, calibration: FieldCalibration): Point {
   const { left, right, top, bottom } = calibration.bounds;
-  const candidate = calibration.corners ? inverseFieldQuad({ x, y }, calibration.corners) : null;
+  // The overlay uses this same rectangular crop transform. Perspective corner
+  // estimates are not applied independently until the overlay can warp too.
+  const candidate = null as Point | null;
   const corrected = candidate && candidate.x >= -0.08 && candidate.x <= 1.08 &&
     candidate.y >= -0.08 && candidate.y <= 1.08 ? candidate : null;
   const u = corrected?.x ?? (x - left) / (right - left);
@@ -856,65 +858,43 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     } catch {
       // An unavailable inventory pass must not break normal imports.
     }
-    const sourceVisualItems: unknown = inventoryItems?.length ? inventoryItems : parsed.items;
-    const visualItems = Array.isArray(sourceVisualItems)
-      ? sourceVisualItems.filter((item: Record<string, unknown>) => !lineTypes.has(String(item?.type)))
-      : [];
-    const fallbackArrows = Array.isArray(parsed.items)
-      ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type))) : [];
-    // Use original image pixels for cone centers when web-side detection succeeds.
-    // In particular, do not retain hallucinated cone rows from the model.
-    const pixelCones = Array.isArray(body?.detectedCones) && body.detectedCones.length <= 80
-      ? body.detectedCones.filter((point: unknown) => {
-          if (!point || typeof point !== "object") return false;
-          const p = point as Record<string, unknown>;
-          return typeof p.x === "number" && typeof p.y === "number" &&
-            Number.isFinite(p.x) && Number.isFinite(p.y) &&
-            p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
-        }) : [];
-    const sourceItems = pixelCones.length
-      ? visualItems.filter((item: Record<string, unknown>) => item?.type !== "cone")
-      : visualItems;
-    const mappedCones = pixelCones.map((point: { x: number; y: number }) =>
-      ({ type: "cone", x: point.x, y: point.y }));
-    const normalized = normalizedItems(
-      [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
-      calibration,
-    );
-    // Test: same calibrated original-image placement system as the pixel cones.
-    // Use inventory positions as the fallback, then directly place independently
-    // detected shirt centers. Never move arrows, invent lines or snap endpoints.
-    const numbered = auditJerseyLabels(normalized, jerseyAudit, calibration);
-    // Inventory is authoritative for the count of physical objects. Overlapping
-    // shirts are distinct, even when they have the same color or unreadable labels.
-    // Deduplicate only independent ARROW detections; never discard a physical
-    // inventory object merely because its measured center matches a neighbour.
-    const physicalItems = numbered.filter((item) => !lineTypes.has(String(item.type)));
-    const tracedLines = deduplicateDetections(numbered.filter((item) => lineTypes.has(String(item.type))));
-    const recovered = recoverSupportPlayers(recoverVerifiedJerseys(
-      normalizeGreyTeamPlayers(normalizeTrainerObjects([...physicalItems, ...tracedLines])),
-      jerseyAudit, body?.detectedPlayers, calibration,
-    ), body?.detectedPlayers, calibration);
-    const uniqueItems = placePlayersAtPixelCenters(recovered, body?.detectedPlayers, calibration);
-    // This audit is informational, never used to "complete" a formation.
-    // Preserve every individual detected physical object for manual correction.
+    // The image is the single source of truth. Detect objects in ORIGINAL full-image
+    // normalized coordinates, then apply the same calibrated mapping ONCE to every
+    // player, cone, ball, caption and both endpoints of every arrow.
+    // Do not substitute a second pixel-detection roster, snap to other objects,
+    // infer missing team members or tactically rearrange anything.
+    const sourceVisualItems: unknown[] = inventoryItems?.length
+      ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
+    const physicalSource = sourceVisualItems.filter((item) =>
+      !!item && typeof item === "object" && !lineTypes.has(String((item as Record<string, unknown>).type)));
+    const sourceArrows = arrowItems.length ? arrowItems
+      : Array.isArray(parsed.items)
+        ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
+        : [];
+    const sourceObjects = [...physicalSource, ...sourceArrows];
+    const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
+      // Grey playing jerseys are displayed as black; retain grey coach T.
+      if (item.type === "player" && item.shirtColor === "grey" &&
+          String(item.label ?? "").toUpperCase() !== "T") return { ...item, shirtColor: "black" };
+      return item;
+    });
+    // Geometry and counts are independent. Each accepted inventory object
+    // produces exactly one canvas item, including overlapping shirts.
     const countTypes = (values: Array<Record<string, unknown>>) => {
       const counts: Record<string, number> = {};
-      for (const item of values) {
-        const type = String(item.type);
+      for (const value of values) {
+        const type = String(value.type);
         counts[type] = (counts[type] || 0) + 1;
       }
       return counts;
     };
-    const inventoryCounts = countTypes(physicalItems);
+    const inventoryCounts = countTypes(physicalSource as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (!inventoryItems?.length) warnings.push("Aparte inventarisatie niet beschikbaar: controleer de aantallen.");
     for (const [type, count] of Object.entries(inventoryCounts)) {
-      if ((outputCounts[type] || 0) < count) {
-        warnings.push(`Bij ${type} zijn minder objecten geplaatst dan herkend. Controleer de foto-overlay.`);
-      }
+      if ((outputCounts[type] || 0) < count) warnings.push(`Niet alle herkende ${type}-objecten zijn geplaatst.`);
     }
-    if (!inventoryItems?.length) warnings.push("De afzonderlijke AI-inventarisatie was niet beschikbaar; controleer de aantallen handmatig.");
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
@@ -922,6 +902,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       explanation: safeText(parsed.explanation),
       instructions: safeText(parsed.instructions),
       board_layout: { fieldMode: "half", fieldOrientation: "top", items: uniqueItems },
+      // Keep source field crop for a pixel-aligned overlay on the editor.
+      field_calibration: calibration,
       import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings },
     });
   } catch {

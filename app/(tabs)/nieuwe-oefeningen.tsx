@@ -135,6 +135,7 @@ export default function NieuweOefeningenScreen() {
             setBoardLayout({
                 ...result.board_layout,
                 backgroundImageUrl: importPhoto.uri,
+                backgroundCalibration: result.field_calibration,
                 backgroundOpacity: 0.65,
             });
             setBoardVersion((version) => version + 1);

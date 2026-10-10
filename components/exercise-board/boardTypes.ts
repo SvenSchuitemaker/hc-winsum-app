@@ -76,6 +76,7 @@ export type ExerciseBoardLayout = {
     items: BoardItem[];
     backgroundImageUrl?: string | null;
     backgroundOpacity?: number;
+    backgroundCalibration?: { bounds: { left: number; top: number; right: number; bottom: number }; rotation: number; flipHorizontal: boolean };
 };
 
 export type ExerciseBoardEditorRef = {

@@ -61,6 +61,7 @@ export function sanitizeLayout(value?: ExerciseBoardLayout | null): ExerciseBoar
         fieldMode: "half",
         fieldOrientation: value?.fieldOrientation === "top" ? "top" : "right",
         items: Array.isArray(value?.items) ? value.items.map(sanitizeItem) : [],
+        backgroundCalibration: value?.backgroundCalibration,
         backgroundImageUrl: typeof value?.backgroundImageUrl === "string" ? value.backgroundImageUrl : null,
         backgroundOpacity: typeof value?.backgroundOpacity === "number" && Number.isFinite(value.backgroundOpacity)
             ? Math.max(0, Math.min(1, value.backgroundOpacity)) : 0.65,
