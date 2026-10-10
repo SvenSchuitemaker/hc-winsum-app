@@ -424,6 +424,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         fieldOrientation={fieldOrientation}
                         backgroundImageUrl={backgroundImageUrl}
                         backgroundOpacity={backgroundOpacity}
+                        backgroundCalibration={backgroundCalibration}
                         showBackground={showBackground}
                     />
                 </View>
