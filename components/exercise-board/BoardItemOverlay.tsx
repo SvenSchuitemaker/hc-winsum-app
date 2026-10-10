@@ -38,6 +38,13 @@ export default function BoardItemOverlay({
     const left = item.x * boardWidth;
     const top = item.y * boardHeight;
     const hatColors = getHatVisualColors(item.color);
+    // Rendering safety net for imported boards saved before color normalization.
+    // The trainer remains grey; manually placed jerseys are unchanged.
+    const jerseyColor = item.type === "player" &&
+        item.id.startsWith("import-") &&
+        item.shirtColor === "grey" &&
+        String(item.label ?? "").trim().toUpperCase() !== "T"
+        ? "black" : item.shirtColor;
 
     return (
         <View
@@ -68,8 +75,8 @@ export default function BoardItemOverlay({
                                     white: "#F5F5F5",
                                     red: "#D93945",
                                     green: "#2EAD72",
-                                } as Record<string, string>)[item.shirtColor ?? "blue"]}
-                                stroke={item.shirtColor === "white" ? "#555555" : "#ECECEC"}
+                                } as Record<string, string>)[jerseyColor ?? "blue"]}
+                                stroke={jerseyColor === "white" ? "#555555" : "#ECECEC"}
                                 strokeWidth="0.85"
                                 strokeLinejoin="round"
                             />
@@ -78,7 +85,7 @@ export default function BoardItemOverlay({
                             numberOfLines={1}
                             style={[
                                 styles.jerseyNumber,
-                                ["white", "orange", "grey"].includes(item.shirtColor ?? "") && { color: "#111111" },
+                                ["white", "orange", "grey"].includes(jerseyColor ?? "") && { color: "#111111" },
                             ]}
                         >
                             {item.label ?? ""}
