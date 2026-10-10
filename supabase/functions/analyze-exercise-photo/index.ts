@@ -749,7 +749,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(recoverVerifiedJerseys(
       normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
         auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
-      )))),
+      ))))),
       jerseyAudit, body?.detectedPlayers, calibration,
     )));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
