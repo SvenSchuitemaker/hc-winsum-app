@@ -542,6 +542,11 @@ function normalizeGreyTeamPlayers(items: Array<Record<string, unknown>>) {
 // Recover a missing jersey ONLY when an independent jersey-number pass and
 // image pixel detection agree on a unique center. Never infer a team roster,
 // create a trainer, or move/overwrite an existing shirt.
+function normalizedJerseyColor(value: unknown) {
+  const color = String(value ?? "").toLowerCase();
+  return color === "grey" ? "black" : color;
+}
+
 function recoverVerifiedJerseys(
   items: Array<Record<string, unknown>>,
   rawAudit: unknown[],
@@ -549,64 +554,99 @@ function recoverVerifiedJerseys(
   calibration: FieldCalibration,
 ) {
   if (!Array.isArray(rawPixels) || rawPixels.length > 80 || !Array.isArray(rawAudit)) return items;
-  const colorOf = (value: unknown) => {
-    const color = String(value ?? "").toLowerCase();
-    return color === "grey" ? "black" : color;
-  };
+  const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
   const pixels = rawPixels.flatMap((raw) => {
     if (!raw || typeof raw !== "object") return [];
     const p = raw as Record<string, unknown>;
-    if (!["black", "grey", "orange", "blue"].includes(String(p.shirtColor)) ||
+    const color = normalizedJerseyColor(p.shirtColor);
+    if (!["black", "orange"].includes(color) ||
         typeof p.x !== "number" || typeof p.y !== "number" ||
         !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
         p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
-    return [{ ...calibratedPoint(p.x, p.y, calibration), color: colorOf(p.shirtColor) }];
+    return [{ ...calibratedPoint(p.x, p.y, calibration), color }];
   });
   const audit = rawAudit.flatMap((raw) => {
     if (!raw || typeof raw !== "object") return [];
     const p = raw as Record<string, unknown>;
+    const color = normalizedJerseyColor(p.shirtColor);
     const label = String(p.label ?? "").trim().toUpperCase();
-    const color = colorOf(p.shirtColor);
-    if (!["black", "orange", "blue"].includes(color) ||
-        !/^[1-9][0-9]?$/.test(label) ||
+    if (!["black", "orange"].includes(color) || !/^[1-9][0-9]?$/.test(label) ||
         typeof p.x !== "number" || typeof p.y !== "number" ||
         !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
         p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
     return [{ ...calibratedPoint(p.x, p.y, calibration), color, label }];
   });
-  const players = items.filter((i) => i.type === "player");
-  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y);
-  const added: Array<Record<string, unknown>> = [];
+  const result = [...items];
+  const players = result.filter((item) => item.type === "player");
   const usedPixels = new Set<number>();
   for (const shirt of audit) {
-    // Multiple OCR reads of one identity are ambiguous, not evidence of
-    // multiple players. Reject them rather than guessing.
+    // Ambiguous repeated OCR identities cannot create extra players.
     if (audit.filter((a) => a.color === shirt.color && a.label === shirt.label).length !== 1) continue;
-    if (players.some((p) => colorOf(p.shirtColor) === shirt.color &&
+    if (players.some((p) => normalizedJerseyColor(p.shirtColor) === shirt.color &&
         String(p.label ?? "").trim().toUpperCase() === shirt.label)) continue;
-    // Existing unnumbered/differently numbered players may represent the same
-    // jersey; never add another object at nearly the same location.
-    if (players.some((p) => distance({ x: Number(p.x), y: Number(p.y) }, shirt) < 0.055)) continue;
-    const neighbors = pixels.map((p, index) => ({ ...p, index, distance: distance(p, shirt) }))
-      .filter((p) => p.color === shirt.color && p.distance <= 0.025)
+    const candidates = pixels.map((p, index) => ({ ...p, index, distance: distance(p, shirt) }))
+      .filter((p) => p.color === shirt.color && p.distance <= 0.04 && !usedPixels.has(p.index))
       .sort((a, b) => a.distance - b.distance);
-    if (neighbors.length !== 1 || usedPixels.has(neighbors[0].index)) continue;
-    const pixel = neighbors[0];
-    // A pixel component must not belong to a different OCR shirt.
+    if (!candidates.length || (candidates[1] && candidates[1].distance - candidates[0].distance < 0.012)) continue;
+    const best = candidates[0];
+    // Another OCR identity claiming the same source pixel is ambiguous.
     if (audit.some((a) => a !== shirt && a.color === shirt.color &&
-        distance(a, pixel) <= pixel.distance + 0.015)) continue;
-    if (added.some((a) => distance({ x: Number(a.x), y: Number(a.y) }, pixel) < 0.055)) continue;
-    usedPixels.add(pixel.index);
-    added.push({
-      id: `import-recovered-${items.length + added.length}`,
-      type: "player",
-      x: pixel.x, y: pixel.y,
-      shirtColor: shirt.color,
-      label: shirt.label,
-    });
+        distance(a, best) <= best.distance + 0.015)) continue;
+    // Only reject a physical collision, not simply a nearby different shirt.
+    if (players.some((p) => normalizedJerseyColor(p.shirtColor) === shirt.color &&
+        distance({ x: Number(p.x), y: Number(p.y) }, best) < 0.022)) continue;
+    const recovered: Record<string, unknown> = {
+      id: `import-recovered-${items.length + result.length}`,
+      type: "player", x: best.x, y: best.y, shirtColor: shirt.color, label: shirt.label,
+    };
+    result.push(recovered);
+    players.push(recovered);
+    usedPixels.add(best.index);
   }
-  return [...items, ...added];
+  return result;
+}
+
+// Recover unlabeled blue support jerseys when their measured pixel center is
+// independently near an actual Steunspeler caption. No guessed formations.
+function recoverSupportPlayers(
+  items: Array<Record<string, unknown>>,
+  rawPixels: unknown,
+  calibration: FieldCalibration,
+) {
+  if (!Array.isArray(rawPixels) || rawPixels.length > 80) return items;
+  const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+  const bluePixels = rawPixels.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const p = raw as Record<string, unknown>;
+    if (String(p.shirtColor).toLowerCase() !== "blue" ||
+        typeof p.x !== "number" || typeof p.y !== "number" ||
+        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+    return [calibratedPoint(p.x, p.y, calibration)];
+  });
+  const result = [...items];
+  const players = result.filter((item) => item.type === "player");
+  const labels = result.filter((item) => item.type === "text" &&
+    String(item.text ?? "").trim().toLowerCase() === "steunspeler");
+  const used = new Set<number>();
+  for (const label of labels) {
+    const position = { x: Number(label.x), y: Number(label.y) };
+    const nearest = bluePixels.map((pixel, index) => ({ pixel, index, d: distance(pixel, position) }))
+      .filter((candidate) => candidate.d <= 0.14 && !used.has(candidate.index))
+      .sort((a, b) => a.d - b.d);
+    if (!nearest.length || (nearest[1] && nearest[1].d - nearest[0].d < 0.02)) continue;
+    const best = nearest[0];
+    used.add(best.index);
+    if (players.some((p) => p.shirtColor === "blue" &&
+        distance({ x: Number(p.x), y: Number(p.y) }, best.pixel) < 0.05)) continue;
+    const recovered: Record<string, unknown> = {
+      id: `import-support-${items.length + result.length}`,
+      type: "player", x: best.pixel.x, y: best.pixel.y, shirtColor: "blue", label: "",
+    };
+    result.push(recovered);
+    players.push(recovered);
+  }
+  return result;
 }
 
 function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
@@ -749,12 +789,12 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(recoverVerifiedJerseys(
+    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(recoverSupportPlayers(recoverVerifiedJerseys(
       normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
         auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
       )))),
       jerseyAudit, body?.detectedPlayers, calibration,
-    )));
+    ), body?.detectedPlayers, calibration)));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
