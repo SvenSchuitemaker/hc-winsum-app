@@ -885,11 +885,36 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // Use inventory positions as the fallback, then directly place independently
     // detected shirt centers. Never move arrows, invent lines or snap endpoints.
     const numbered = auditJerseyLabels(normalized, jerseyAudit, calibration);
+    // Inventory is authoritative for the count of physical objects. Overlapping
+    // shirts are distinct, even when they have the same color or unreadable labels.
+    // Deduplicate only independent ARROW detections; never discard a physical
+    // inventory object merely because its measured center matches a neighbour.
+    const physicalItems = numbered.filter((item) => !lineTypes.has(String(item.type)));
+    const tracedLines = deduplicateDetections(numbered.filter((item) => lineTypes.has(String(item.type))));
     const recovered = recoverSupportPlayers(recoverVerifiedJerseys(
-      normalizeGreyTeamPlayers(normalizeTrainerObjects(deduplicateDetections(numbered))),
+      normalizeGreyTeamPlayers(normalizeTrainerObjects([...physicalItems, ...tracedLines])),
       jerseyAudit, body?.detectedPlayers, calibration,
     ), body?.detectedPlayers, calibration);
     const uniqueItems = placePlayersAtPixelCenters(recovered, body?.detectedPlayers, calibration);
+    // This audit is informational, never used to "complete" a formation.
+    // Preserve every individual detected physical object for manual correction.
+    const countTypes = (values: Array<Record<string, unknown>>) => {
+      const counts: Record<string, number> = {};
+      for (const item of values) {
+        const type = String(item.type);
+        counts[type] = (counts[type] || 0) + 1;
+      }
+      return counts;
+    };
+    const inventoryCounts = countTypes(physicalItems);
+    const outputCounts = countTypes(uniqueItems);
+    const warnings: string[] = [];
+    for (const [type, count] of Object.entries(inventoryCounts)) {
+      if ((outputCounts[type] || 0) < count) {
+        warnings.push(`Bij ${type} zijn minder objecten geplaatst dan herkend. Controleer de foto-overlay.`);
+      }
+    }
+    if (!inventoryItems?.length) warnings.push("De afzonderlijke AI-inventarisatie was niet beschikbaar; controleer de aantallen handmatig.");
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
@@ -897,6 +922,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       explanation: safeText(parsed.explanation),
       instructions: safeText(parsed.instructions),
       board_layout: { fieldMode: "half", fieldOrientation: "top", items: uniqueItems },
+      import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings },
     });
   } catch {
     return json({ error: "Could not analyze this image." }, 500);
