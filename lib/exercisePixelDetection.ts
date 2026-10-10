@@ -67,7 +67,7 @@ export async function detectRedCones(photo: SelectedExercisePhoto): Promise<Pixe
         // Tall standing cones only: exclude large red player circles, specks,
         // horizontal field decorations and tiny compression artifacts.
         if (pixels < 35 || pixels > 1600 || bw < 5 || bh < 10 ||
-            ratio < 1.12 || ratio > 3.5 || fill < 0.18 || fill > 0.9 ||
+            ratio < 0.75 || ratio > 3.5 || fill < 0.12 || fill > 0.95 ||
             bw > width * 0.065 || bh > height * 0.095) continue;
         result.push({ x: sx / pixels / width, y: sy / pixels / height });
     }
