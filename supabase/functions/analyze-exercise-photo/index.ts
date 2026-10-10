@@ -631,6 +631,11 @@ function recoverSupportPlayers(
   const used = new Set<number>();
   for (const label of labels) {
     const position = { x: Number(label.x), y: Number(label.y) };
+    // Captions may be offset from an already detected jersey. Never create
+    // a second support player just because the pixel detector found a nearby
+    // component of that same shirt.
+    if (players.some((p) => p.shirtColor === "blue" &&
+        distance({ x: Number(p.x), y: Number(p.y) }, position) < 0.12)) continue;
     const nearest = bluePixels.map((pixel, index) => ({ pixel, index, d: distance(pixel, position) }))
       .filter((candidate) => candidate.d <= 0.14 && !used.has(candidate.index))
       .sort((a, b) => a.d - b.d);
@@ -638,7 +643,7 @@ function recoverSupportPlayers(
     const best = nearest[0];
     used.add(best.index);
     if (players.some((p) => p.shirtColor === "blue" &&
-        distance({ x: Number(p.x), y: Number(p.y) }, best.pixel) < 0.05)) continue;
+        distance({ x: Number(p.x), y: Number(p.y) }, best.pixel) < 0.095)) continue;
     const recovered: Record<string, unknown> = {
       id: `import-support-${items.length + result.length}`,
       type: "player", x: best.pixel.x, y: best.pixel.y, shirtColor: "blue", label: "",
