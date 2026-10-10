@@ -684,6 +684,53 @@ function recoverSupportPlayers(
   return result;
 }
 
+// Experimental cone-style placement: pixel centers are the source of truth
+// for existing shirt objects. OCR labels and inventory counts are preserved.
+function placePlayersAtPixelCenters(
+  items: Array<Record<string, unknown>>,
+  rawPixels: unknown,
+  calibration: FieldCalibration,
+) {
+  if (!Array.isArray(rawPixels) || rawPixels.length > 80) return items;
+  const pixels = rawPixels.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const p = raw as Record<string, unknown>;
+    if (!["black", "grey", "orange", "blue"].includes(String(p.shirtColor)) ||
+        typeof p.x !== "number" || typeof p.y !== "number" ||
+        !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+        p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return [];
+    return [{ ...calibratedPoint(p.x, p.y, calibration),
+      color: normalizedJerseyColor(p.shirtColor) }];
+  });
+  const next = items.map((item) => ({ ...item }));
+  const players = next.filter((item) => item.type === "player");
+  const used = new Set<number>();
+  // Match uniquely nearest same-team centers without swapping adjacent shirts.
+  const proposals = players.flatMap((player) => {
+    const color = normalizedJerseyColor(player.shirtColor);
+    // Do not conflate trainer T with a normal black-team jersey.
+    if (String(player.label ?? "").trim().toUpperCase() === "T") return [];
+    const alternatives = pixels.map((pixel, index) => ({
+      index, pixel, distance: Math.hypot(Number(player.x) - pixel.x, Number(player.y) - pixel.y),
+    })).filter((p) => p.pixel.color === color && p.distance < 0.085)
+      .sort((a, b) => a.distance - b.distance);
+    if (!alternatives.length ||
+        (alternatives[1] && alternatives[1].distance - alternatives[0].distance < 0.018)) return [];
+    const nearest = alternatives[0];
+    const competing = players.some((other) => other !== player &&
+      normalizedJerseyColor(other.shirtColor) === color &&
+      Math.hypot(Number(other.x) - nearest.pixel.x, Number(other.y) - nearest.pixel.y) < nearest.distance + 0.012);
+    return competing ? [] : [{ player, ...nearest }];
+  }).sort((a, b) => a.distance - b.distance);
+  for (const proposal of proposals) {
+    if (used.has(proposal.index)) continue;
+    proposal.player.x = proposal.pixel.x;
+    proposal.player.y = proposal.pixel.y;
+    used.add(proposal.index);
+  }
+  return next;
+}
+
 function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
   const players = items.filter((item) => item.type === "player" || item.type === "trainer" ||
     item.type === "attacker" || item.type === "defender");
@@ -834,12 +881,15 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       [...sourceItems, ...mappedCones, ...(arrowItems.length ? arrowItems : fallbackArrows)],
       calibration,
     );
-    const uniqueItems = filterUnanchoredArrows(anchorSupportLabels(recoverSupportPlayers(recoverVerifiedJerseys(
-      normalizeGreyTeamPlayers(normalizeTrainerObjects(applyDiagramConstraints(deduplicateDetections(
-        auditJerseyLabels(anchorPixelPlayers(normalized, body?.detectedPlayers, calibration, jerseyAudit), jerseyAudit, calibration),
-      )))),
+    // Test: same calibrated original-image placement system as the pixel cones.
+    // Use inventory positions as the fallback, then directly place independently
+    // detected shirt centers. Never move arrows, invent lines or snap endpoints.
+    const numbered = auditJerseyLabels(normalized, jerseyAudit, calibration);
+    const recovered = recoverSupportPlayers(recoverVerifiedJerseys(
+      normalizeGreyTeamPlayers(normalizeTrainerObjects(deduplicateDetections(numbered))),
       jerseyAudit, body?.detectedPlayers, calibration,
-    ), body?.detectedPlayers, calibration)));
+    ), body?.detectedPlayers, calibration);
+    const uniqueItems = placePlayersAtPixelCenters(recovered, body?.detectedPlayers, calibration);
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
