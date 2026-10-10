@@ -346,9 +346,12 @@ function deduplicateDetections(items: Array<Record<string, unknown>>) {
         return String(item.text).trim().toLowerCase() === String(previous.text).trim().toLowerCase()
           && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.075;
       }
+      // Overlapping shirt icons can be separate people. Only remove almost
+      // identical SAME-identity detections; never dedupe by proximity alone.
+      const threshold = item.type === "player" ? 0.007 : 0.018;
       return item.type === previous.type && item.label === previous.label
         && item.shirtColor === previous.shirtColor
-        && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < 0.018;
+        && Math.hypot(x - Number(previous.x), y - Number(previous.y)) < threshold;
     })) continue;
     seen.push(item);
   }
@@ -620,6 +623,7 @@ function recoverVerifiedJerseys(
         distance(a, best) <= best.distance + 0.015)) continue;
     // Only reject a physical collision, not simply a nearby different shirt.
     if (players.some((p) => normalizedJerseyColor(p.shirtColor) === shirt.color &&
+        String(p.label ?? "").trim().toUpperCase() === shirt.label &&
         distance({ x: Number(p.x), y: Number(p.y) }, best) < 0.022)) continue;
     const recovered: Record<string, unknown> = {
       id: `import-recovered-${items.length + result.length}`,
