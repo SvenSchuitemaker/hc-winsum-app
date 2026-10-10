@@ -59,6 +59,7 @@ export default function NieuweOefeningenScreen() {
     const [importMode, setImportMode] = useState<"photo" | "ai">("photo");
     const [analyzing, setAnalyzing] = useState(false);
     const [importError, setImportError] = useState("");
+    const [importAudit, setImportAudit] = useState<{ inventory: Record<string, number>; placed: Record<string, number>; warnings: string[] } | null>(null);
     const [boardVersion, setBoardVersion] = useState(0);
     const [subtitle, setSubtitle] = useState("");
     const [explanation, setExplanation] = useState("");
@@ -111,6 +112,7 @@ export default function NieuweOefeningenScreen() {
             const selected = await selectExercisePhoto();
             if (!selected) return;
             setImportPhoto(selected);
+            setImportAudit(null);
             // A new photo must not reuse objects recognized from a previous photo.
             setBoardLayout(createEmptyBoardLayout());
             setBoardVersion((version) => version + 1);
@@ -125,6 +127,7 @@ export default function NieuweOefeningenScreen() {
             setAnalyzing(true);
             setImportError("");
             const result = await analyzeExercisePhoto(importPhoto);
+            setImportAudit(result.import_audit ?? null);
             if (result.title) setTitle(result.title);
             if (result.subtitle) setSubtitle(result.subtitle);
             if (result.explanation) setExplanation(result.explanation);
@@ -158,6 +161,7 @@ export default function NieuweOefeningenScreen() {
         setImageUrl("");
         setFormError("");
         setImportPhoto(null);
+        setImportAudit(null);
         setImportError("");
         setBoardVersion((version) => version + 1);
         setSubtitle("");
@@ -337,6 +341,19 @@ export default function NieuweOefeningenScreen() {
                         </Pressable>
                     )}
                     {!!importError && <Text style={styles.importError}>{importError}</Text>}
+                    {importMode === "ai" && importAudit && (
+                        <View style={{ marginTop: 12, gap: 6 }}>
+                            <Text style={styles.helpText}>AI-inventarisatie (controleer met de originele foto):</Text>
+                            {Object.entries(importAudit.placed).map(([type, count]) => (
+                                <Text key={type} style={styles.helpText}>
+                                    {type}: {count} geplaatst{importAudit.inventory[type] !== undefined ? ` / ${importAudit.inventory[type]} herkend` : ""}
+                                </Text>
+                            ))}
+                            {importAudit.warnings.map((warning, index) => (
+                                <Text key={index} style={styles.importError}>{warning}</Text>
+                            ))}
+                        </View>
+                    )}
                     {importMode === "ai" && <Text style={styles.helpText}>Als je analyseert, wordt de foto naar onze beveiligde Supabase-functie en een AI-dienst verzonden. Dit kan API-kosten veroorzaken. Controleer en corrigeer de onderdelen hieronder voordat je opslaat.</Text>}
                 </View>
 
