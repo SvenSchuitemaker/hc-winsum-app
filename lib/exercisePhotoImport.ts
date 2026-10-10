@@ -18,6 +18,11 @@ export type ExercisePhotoAnalysis = {
     explanation: string;
     instructions: string;
     board_layout: ExerciseBoardLayout;
+    import_audit?: {
+        inventory: Record<string, number>;
+        placed: Record<string, number>;
+        warnings: string[];
+    };
 };
 
 export async function selectExercisePhoto(): Promise<SelectedExercisePhoto | null> {
