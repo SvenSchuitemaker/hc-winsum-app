@@ -614,8 +614,11 @@ function filterUnanchoredArrows(items: Array<Record<string, unknown>>) {
     item.type === "attacker" || item.type === "defender");
   // Leave images without recognizable players unchanged.
   if (players.length < 2) return items;
+  // Arrow tips in the original photo often end just BEFORE a jersey.
+  // Allow that small visual gap without inventing arrows: every retained
+  // segment still needs a real detected player near BOTH endpoints.
   const nearPlayer = (x: number, y: number) => players.some((player) =>
-    Math.hypot(Number(player.x) - x, Number(player.y) - y) < 0.105);
+    Math.hypot(Number(player.x) - x, Number(player.y) - y) < 0.16);
   return items.filter((item) => {
     if (!lineTypes.has(String(item.type))) return true;
     const x = Number(item.x), y = Number(item.y), x2 = Number(item.x2), y2 = Number(item.y2);
