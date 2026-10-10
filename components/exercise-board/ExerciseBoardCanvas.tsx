@@ -32,6 +32,7 @@ type Props = {
     fieldOrientation?: "right" | "top";
     backgroundImageUrl?: string | null;
     backgroundOpacity?: number;
+    backgroundCalibration?: { bounds: { left: number; top: number; right: number; bottom: number }; rotation: number; flipHorizontal: boolean };
     showBackground?: boolean;
 };
 
@@ -51,6 +52,7 @@ export default function ExerciseBoardCanvas({
     backgroundImageUrl,
     fieldOrientation = "right",
     backgroundOpacity = 0.65,
+    backgroundCalibration,
     showBackground = true,
 }: Props) {
     return (
@@ -59,7 +61,17 @@ export default function ExerciseBoardCanvas({
                 <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {fieldOrientation === "top" ? renderTopField() : renderHalfField()}
                     {backgroundImageUrl && showBackground && (
-                        <SvgImage href={{ uri: backgroundImageUrl }} x="0" y="0" width="100" height="100" opacity={backgroundOpacity} preserveAspectRatio="none" />
+                        <G transform={`${backgroundCalibration?.flipHorizontal ? "translate(100 0) scale(-1 1) " : ""}rotate(${backgroundCalibration?.rotation ?? 0} 50 50)`}>
+                            <SvgImage
+                                href={{ uri: backgroundImageUrl }}
+                                x={backgroundCalibration ? -100 * backgroundCalibration.bounds.left / (backgroundCalibration.bounds.right - backgroundCalibration.bounds.left) : 0}
+                                y={backgroundCalibration ? -100 * backgroundCalibration.bounds.top / (backgroundCalibration.bounds.bottom - backgroundCalibration.bounds.top) : 0}
+                                width={backgroundCalibration ? 100 / (backgroundCalibration.bounds.right - backgroundCalibration.bounds.left) : 100}
+                                height={backgroundCalibration ? 100 / (backgroundCalibration.bounds.bottom - backgroundCalibration.bounds.top) : 100}
+                                opacity={backgroundOpacity}
+                                preserveAspectRatio="none"
+                            />
+                        </G>
                     )}
 
                     {lineItems.map((item: BoardItem) => {
