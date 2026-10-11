@@ -1172,11 +1172,21 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       for (const color of groups) {
         const entries = values.flatMap((raw, index) => {
           const item = raw as Record<string, unknown>;
-          if (item?.type !== "player" || String(item.shirtColor).toLowerCase() !== color ||
+          if (item?.type !== "player" ||
+              (color === "black"
+                ? !["black", "grey"].includes(String(item.shirtColor).toLowerCase())
+                : String(item.shirtColor).toLowerCase() !== color) ||
               !Number.isFinite(Number(item.x)) || !Number.isFinite(Number(item.y))) return [];
           return [{ index, item }];
         });
-        const pixels = anchors.filter((p) => p.shirtColor === color);
+        // Black and grey playing shirts are the same visual team in this
+        // editor. The pixel detector may classify black outlines as grey,
+        // while vision inventories them as black. Match the COMBINED roster
+        // exactly once rather than allowing either color to drift.
+        if (color === "grey") continue;
+        const pixels = anchors.filter((p) =>
+          color === "black" ? (p.shirtColor === "black" || p.shirtColor === "grey")
+            : p.shirtColor === color);
         // The orange mask sometimes includes one additional orange fragment.
         // Choose the best distinct centers using the global assignment below,
         // without changing the number of actual AI-inventoried shirts.
