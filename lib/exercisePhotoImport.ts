@@ -24,6 +24,7 @@ export type ExercisePhotoAnalysis = {
         inventory: Record<string, number>;
         placed: Record<string, number>;
         warnings: string[];
+        lineConnections?: Array<{ line: number; from: string; to: string; type: string; status: string }>;
     };
 };
 

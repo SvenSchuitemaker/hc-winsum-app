@@ -1292,6 +1292,44 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     });
     const connections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
       photoActors, arrowRequests);
+    // Expose the AI's interpretation as diagnostics even when geometry rejects
+    // a connection. Never present an unvalidated guess as a confirmed route.
+    const blueActors = actorItems.map((actor, id) => ({ actor, id }))
+      .filter(({ actor }) => String(actor.shirtColor ?? "").toLowerCase() === "blue")
+      .sort((a, b) => Number(a.actor.x) - Number(b.actor.x));
+    const describeActor = (id: number) => {
+      const actor = actorItems[id];
+      if (!actor) return "Onbekende speler";
+      const color = String(actor.shirtColor ?? "").toLowerCase();
+      const number = String(actor.label ?? "").trim();
+      if (color === "blue") {
+        const position = blueActors.length < 2 ? "" :
+          blueActors[0]?.id === id ? " links" :
+          blueActors[blueActors.length - 1]?.id === id ? " rechts" : "";
+        return `Steunspeler${position}`;
+      }
+      if (actor.type === "trainer" || number.toUpperCase() === "T")
+        return "Trainer";
+      const team = color === "black" ? "zwart" : color === "orange" ? "oranje" : color;
+      return `Aanvaller${number ? ` ${number}` : ""}${team ? ` (${team})` : ""}`;
+    };
+    const lineConnections: Array<{ line: number; from: string; to: string; type: string; status: string }> =
+      canvasArrows.map((arrow, index) => ({
+        line: index + 1, from: "Onbekend", to: "Onbekend",
+        type: String(arrow.type), status: "niet herkend",
+      }));
+    for (const value of connections) {
+      const lineId = Number(value?.lineId);
+      const fromId = Number(value?.fromActorId);
+      const toId = Number(value?.toActorId);
+      if (!Number.isInteger(lineId) || lineId < 0 || lineId >= lineConnections.length ||
+          !Number.isInteger(fromId) || !Number.isInteger(toId) ||
+          !actorItems[fromId] || !actorItems[toId]) continue;
+      lineConnections[lineId] = {
+        line: lineId + 1, from: describeActor(fromId), to: describeActor(toId),
+        type: value.type === "runLine" ? "runLine" : "passLine", status: "voorgesteld",
+      };
+    }
     let connectedLineCount = 0;
     let rejectedActorConnections = 0;
     const usedConnectionLines = new Set<number>();
@@ -1346,6 +1384,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       item.x = from.x; item.y = from.y; item.x2 = to.x; item.y2 = to.y;
       item.type = raw.type;
       usedConnectionLines.add(lineId);
+      lineConnections[lineId].status = "bevestigd";
       connectedLineCount++;
     }
     // Geometry and counts are independent. Each accepted inventory object
@@ -1392,7 +1431,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       board_layout: { fieldMode: "half", fieldOrientation: "top", items: uniqueItems },
       // Keep source field crop for a pixel-aligned overlay on the editor.
       field_calibration: calibration,
-      import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings },
+      import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings, lineConnections },
       layers,
     });
   } catch {
