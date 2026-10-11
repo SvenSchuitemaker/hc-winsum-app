@@ -1197,6 +1197,42 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           String(item.label ?? "").toUpperCase() !== "T") return { ...item, shirtColor: "black" };
       return item;
     });
+    // Adjust ONLY lines, after every physical object has its final position.
+    // Endpoint correction is intentionally local: a remotely detected point
+    // must never get pulled across the board to an unrelated jersey.
+    const actorAnchors = uniqueItems.filter((item) => item.type === "player" ||
+      item.type === "trainer");
+    const findUnambiguousActor = (x: number, y: number) => {
+      const sorted = actorAnchors.map((actor) => ({
+        actor,
+        distance: Math.hypot(Number(actor.x) - x, Number(actor.y) - y),
+      })).sort((a, b) => a.distance - b.distance);
+      if (!sorted.length || sorted[0].distance > 0.035 ||
+          (sorted[1] && sorted[1].distance - sorted[0].distance < 0.018))
+        return null;
+      return sorted[0].actor;
+    };
+    let localEndpointCorrections = 0;
+    for (const item of uniqueItems) {
+      if (item.type !== "passLine" && item.type !== "runLine" &&
+          item.type !== "guideLine") continue;
+      const x = Number(item.x), y = Number(item.y);
+      const x2 = Number(item.x2), y2 = Number(item.y2);
+      if (![x,y,x2,y2].every(Number.isFinite)) continue;
+      const start = findUnambiguousActor(x, y);
+      const end = findUnambiguousActor(x2, y2);
+      const newStart = start ? { x: Number(start.x), y: Number(start.y) } : { x,y };
+      const newEnd = end ? { x: Number(end.x), y: Number(end.y) } : { x: x2, y: y2 };
+      // Do not collapse a stroke, reverse it or extend it significantly.
+      const oldDX = x2-x, oldDY = y2-y;
+      const newDX = newEnd.x-newStart.x, newDY = newEnd.y-newStart.y;
+      const oldLength = Math.hypot(oldDX,oldDY);
+      const newLength = Math.hypot(newDX,newDY);
+      if (newLength < 0.025 || oldDX*newDX+oldDY*newDY <= 0 ||
+          newLength > oldLength + 0.04) continue;
+      if (start) { item.x = newStart.x; item.y = newStart.y; localEndpointCorrections++; }
+      if (end) { item.x2 = newEnd.x; item.y2 = newEnd.y; localEndpointCorrections++; }
+    }
     // Geometry and counts are independent. Each accepted inventory object
     // produces exactly one canvas item, including overlapping shirts.
     const countTypes = (values: Array<Record<string, unknown>>) => {
@@ -1210,6 +1246,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (sourceArrows.length && localEndpointCorrections === 0)
+      warnings.push("Geen betrouwbare lokale aansluiting op spelers gevonden; lijnpunten uit de originele foto behouden.");
     if (focusedNormalized.length && genericNormalized.length && focusedNormalized.length !== genericNormalized.length)
       warnings.push("De twee AI-analyses tellen verschillende aantallen pijlen. Alleen de afzonderlijk getraceerde pijlen zijn gebruikt; controleer de foto.");
     if (sourceArrows.length && verifiedEndpoints < sourceArrows.length)
