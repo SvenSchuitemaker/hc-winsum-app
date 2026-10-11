@@ -226,7 +226,7 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify each actual arrow by visible evidence: runLine ONLY for a movement/running route shown by a dashed, zigzag, or distinct running-style stroke; passLine for a solid arrow visibly indicating a ball pass; guideLine when the drawing does not establish its meaning. Never call a solid pass line a runLine merely because it points to a player. Never invent missing running lines. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Before returning, verify the tail, arrowhead tip, and black stroke connecting them are all visible in the uploaded image. Do not join two separate arrows into one long line. Follow three-part paths as separate strokes only when separate arrowheads actually exist. Reject any line unsupported by dark pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. First independently count visible BLACK arrowheads (not arrows imagined from player positions), then return exactly one stroke per uniquely visible arrowhead. Ensure each item has its own physically visible tip. Never duplicate a tip, invent extra arrows, or drop an arrowhead that is clearly present. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify each actual arrow by visible evidence: runLine ONLY for a movement/running route shown by a dashed, zigzag, or distinct running-style stroke; passLine for a solid arrow visibly indicating a ball pass; guideLine when the drawing does not establish its meaning. Never call a solid pass line a runLine merely because it points to a player. Never invent missing running lines. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Before returning, verify the tail, arrowhead tip, and black stroke connecting them are all visible in the uploaded image. Do not join two separate arrows into one long line. Follow three-part paths as separate strokes only when separate arrowheads actually exist. Reject any line unsupported by dark pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
         { role: "user", content: [
           { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -948,7 +948,16 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // stroke-tracing pass when it sees any drawable lines; the general pass
     // is a fallback ONLY when the dedicated pass has no valid strokes.
     // Neither source is allowed to infer extra arrows from player formation.
-    const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
+    // Dedicated arrow tracing is independent of the physical-object layers.
+    // Reject near-identical arrowheads to avoid drawing the same ink twice.
+    const focusedUnique: Record<string, unknown>[] = [];
+    for (const candidate of focusedNormalized) {
+      const duplicateTip = focusedUnique.some(other =>
+        Math.hypot(Number(other.x2) - Number(candidate.x2),
+                   Number(other.y2) - Number(candidate.y2)) < 0.028);
+      if (!duplicateTip) focusedUnique.push(candidate);
+    }
+    const rawArrows = focusedUnique.length ? focusedUnique : genericNormalized;
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
     let endpointChecks: unknown[] = [];
@@ -1197,42 +1206,6 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           String(item.label ?? "").toUpperCase() !== "T") return { ...item, shirtColor: "black" };
       return item;
     });
-    // Adjust ONLY lines, after every physical object has its final position.
-    // Endpoint correction is intentionally local: a remotely detected point
-    // must never get pulled across the board to an unrelated jersey.
-    const actorAnchors = uniqueItems.filter((item) => item.type === "player" ||
-      item.type === "trainer");
-    const findUnambiguousActor = (x: number, y: number) => {
-      const sorted = actorAnchors.map((actor) => ({
-        actor,
-        distance: Math.hypot(Number(actor.x) - x, Number(actor.y) - y),
-      })).sort((a, b) => a.distance - b.distance);
-      if (!sorted.length || sorted[0].distance > 0.035 ||
-          (sorted[1] && sorted[1].distance - sorted[0].distance < 0.018))
-        return null;
-      return sorted[0].actor;
-    };
-    let localEndpointCorrections = 0;
-    for (const item of uniqueItems) {
-      if (item.type !== "passLine" && item.type !== "runLine" &&
-          item.type !== "guideLine") continue;
-      const x = Number(item.x), y = Number(item.y);
-      const x2 = Number(item.x2), y2 = Number(item.y2);
-      if (![x,y,x2,y2].every(Number.isFinite)) continue;
-      const start = findUnambiguousActor(x, y);
-      const end = findUnambiguousActor(x2, y2);
-      const newStart = start ? { x: Number(start.x), y: Number(start.y) } : { x,y };
-      const newEnd = end ? { x: Number(end.x), y: Number(end.y) } : { x: x2, y: y2 };
-      // Do not collapse a stroke, reverse it or extend it significantly.
-      const oldDX = x2-x, oldDY = y2-y;
-      const newDX = newEnd.x-newStart.x, newDY = newEnd.y-newStart.y;
-      const oldLength = Math.hypot(oldDX,oldDY);
-      const newLength = Math.hypot(newDX,newDY);
-      if (newLength < 0.025 || oldDX*newDX+oldDY*newDY <= 0 ||
-          newLength > oldLength + 0.04) continue;
-      if (start) { item.x = newStart.x; item.y = newStart.y; localEndpointCorrections++; }
-      if (end) { item.x2 = newEnd.x; item.y2 = newEnd.y; localEndpointCorrections++; }
-    }
     // Geometry and counts are independent. Each accepted inventory object
     // produces exactly one canvas item, including overlapping shirts.
     const countTypes = (values: Array<Record<string, unknown>>) => {
@@ -1246,9 +1219,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
-    if (sourceArrows.length && localEndpointCorrections === 0)
-      warnings.push("Geen betrouwbare lokale aansluiting op spelers gevonden; lijnpunten uit de originele foto behouden.");
-    if (focusedNormalized.length && genericNormalized.length && focusedNormalized.length !== genericNormalized.length)
+    if (focusedUnique.length && genericNormalized.length && focusedUnique.length !== genericNormalized.length)
       warnings.push("De twee AI-analyses tellen verschillende aantallen pijlen. Alleen de afzonderlijk getraceerde pijlen zijn gebruikt; controleer de foto.");
     if (sourceArrows.length && verifiedEndpoints < sourceArrows.length)
       warnings.push(`Pijlpuntcontrole bevestigd: ${verifiedEndpoints}/${sourceArrows.length}. Niet-bevestigde lijnen behouden hun eerdere coördinaten.`);
