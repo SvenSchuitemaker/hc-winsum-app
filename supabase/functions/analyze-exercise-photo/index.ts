@@ -1030,7 +1030,55 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // A general-purpose recognition pass may re-describe the SAME ink with
     // different geometry. Do not merge its speculative arrows into the
     // dedicated trace: this previously turned three drawn arrows into four.
-    const rawArrows = focusedUnique.length ? focusedUnique : genericNormalized;
+    const rawArrows = [...(focusedUnique.length ? focusedUnique : genericNormalized)];
+    // Recover a single omitted stroke only when a second reading sees exactly
+    // ONE more arrow. Never bulk-union the readings: that introduced fake lines.
+    // Both endpoints must be close to DIFFERENT existing non-trainer jerseys,
+    // and a separate visual audit must verify the same directed ink stroke.
+    if (focusedUnique.length && genericNormalized.length === focusedUnique.length + 1) {
+      const shirts = physicalSource.flatMap((raw) => {
+        const actor = raw as Record<string, unknown>;
+        if (!["player", "attacker", "defender"].includes(String(actor.type)) ||
+            String(actor.label ?? "").trim().toUpperCase() === "T") return [];
+        const x = Number(actor.x), y = Number(actor.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
+      });
+      const distance = (a: {x:number;y:number}, b: {x:number;y:number}) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const ends = (line: Record<string, unknown>) => [
+        {x:Number(line.x),y:Number(line.y)}, {x:Number(line.x2),y:Number(line.y2)},
+      ];
+      const sameInk = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+        const [a0,a1]=ends(a), [b0,b1]=ends(b);
+        return (distance(a0,b0)<0.075 && distance(a1,b1)<0.075) ||
+          (distance(a0,b1)<0.075 && distance(a1,b0)<0.075);
+      };
+      const possible = genericNormalized.filter(line => {
+        if (focusedUnique.some(existing => sameInk(line, existing))) return false;
+        const [tail, tip] = ends(line);
+        const nearest = (point:{x:number;y:number}) => shirts
+          .map((shirt,i)=>({i,d:distance(point,shirt)}))
+          .sort((a,b)=>a.d-b.d)[0];
+        const from=nearest(tail), to=nearest(tip);
+        return from && to && from.i !== to.i && from.d < 0.085 && to.d < 0.085;
+      });
+      if (possible.length === 1) {
+        try {
+          const audit = await verifyArrowEndpoints(key!, visionModel, mimeType, base64, possible);
+          const result = audit.length === 1 ? audit[0] as Record<string, unknown> : null;
+          const checked = result && Number(result.id) === 0 ? normalizeArrowCoordinates(result) : null;
+          if (checked) {
+            const [a0,a1]=ends(possible[0]), [b0,b1]=ends(checked);
+            const ux=a1.x-a0.x, uy=a1.y-a0.y, vx=b1.x-b0.x, vy=b1.y-b0.y;
+            const cosine=(ux*vx+uy*vy)/(Math.max(0.00001,Math.hypot(ux,uy)*Math.hypot(vx,vy)));
+            if (distance(a0,b0)<0.045 && distance(a1,b1)<0.045 && cosine>0.95 &&
+                !focusedUnique.some(existing=>sameInk(existing,checked))) {
+              rawArrows.push(checked);
+            }
+          }
+        } catch { /* An uncertain third arrow is better omitted than invented. */ }
+      }
+    }
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
     let endpointChecks: unknown[] = [];
