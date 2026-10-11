@@ -1293,8 +1293,26 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       return { id, x: Number(source.x), y: Number(source.y),
         x2: Number(source.x2), y2: Number(source.y2), type: String(item.type) };
     });
-    const connections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
+    const firstConnections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
       photoActors, arrowRequests);
+    // Ask for a separate, object-ID-only reading of the visible arrows.
+    // The second opinion is independent of the first model's proposed edges.
+    // Only agreement may move a line to shirt centres. This protects a good
+    // connection against an unrelated guessed trainer/player pairing.
+    const secondConnections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
+      photoActors, arrowRequests);
+    const secondByLine = new Map<number, (typeof secondConnections)[number]>();
+    for (const proposed of secondConnections) {
+      const id = Number(proposed.lineId);
+      if (Number.isInteger(id) && !secondByLine.has(id)) secondByLine.set(id, proposed);
+    }
+    const connections = firstConnections.map((first) => {
+      const second = secondByLine.get(Number(first.lineId));
+      if (!second ||
+          Number(first.fromActorId) !== Number(second.fromActorId) ||
+          Number(first.toActorId) !== Number(second.toActorId)) return { ...first, agreed: false };
+      return { ...first, agreed: true };
+    });
     // Expose the AI's interpretation as diagnostics even when geometry rejects
     // a connection. Never present an unvalidated guess as a confirmed route.
     const blueActors = actorItems.map((actor, id) => ({ actor, id }))
@@ -1330,7 +1348,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           !actorItems[fromId] || !actorItems[toId]) continue;
       lineConnections[lineId] = {
         line: lineId + 1, from: describeActor(fromId), to: describeActor(toId),
-        type: String(canvasArrows[lineId]?.type ?? "guideLine"), status: "voorgesteld",
+        type: String(canvasArrows[lineId]?.type ?? "guideLine"),
+        status: value.agreed ? "voorgesteld" : "onzeker: analyses verschillen",
       };
     }
     let connectedLineCount = 0;
@@ -1346,6 +1365,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const item = canvasArrows[lineId];
       const from = actorItems[fromId], to = actorItems[toId];
       if (!item || !from || !to || !lineTypes.has(String(item.type))) continue;
+      if (!raw.agreed) { rejectedActorConnections++; continue; }
       if (raw.type !== "passLine" && raw.type !== "runLine") continue;
       const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
       if (Math.hypot(dx, dy) < 0.025) continue;
