@@ -867,13 +867,23 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
     const physicalSource = sourceVisualItems.filter((item) =>
       !!item && typeof item === "object" && !lineTypes.has(String((item as Record<string, unknown>).type)));
-    const rawArrows = arrowItems.length ? arrowItems
+    // Reject arrows that have identical/near-identical endpoints. Previous
+    // audits counted these as "placed" even though nothing could be drawn.
+    const usableArrow = (value: unknown): boolean => {
+      if (!value || typeof value !== "object") return false;
+      const a = value as Record<string, unknown>;
+      const x = Number(a.x), y = Number(a.y), x2 = Number(a.x2), y2 = Number(a.y2);
+      return [x, y, x2, y2].every(Number.isFinite) &&
+        Math.hypot(x2 - x, y2 - y) >= 0.035;
+    };
+    const validFocusedArrows = arrowItems.filter(usableArrow);
+    const rawArrows = validFocusedArrows.length ? validFocusedArrows
       : Array.isArray(parsed.items)
         ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
         : [];
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
-    const sourceArrows = rawArrows.map((value) => {
+    const sourceArrows = rawArrows.filter(usableArrow).map((value) => {
       const arrow = value as Record<string, unknown>;
       if (!arrow || !lineTypes.has(String(arrow.type))) return value;
       // A guideLine is genuinely ambiguous; render it, but never automatically
@@ -1086,6 +1096,10 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     if (playerAnchors.length && playerAnchors.length !== physicalSource.filter((v) =>
       (v as Record<string, unknown>).type === "player").length)
       warnings.push("Shirt-pixeltelling verschilt van AI-inventaris: geen extra spelers aangemaakt; controleer ontbrekende of dubbel gedetecteerde shirts.");
+    if (arrowItems.length !== validFocusedArrows.length)
+      warnings.push("Eén of meer AI-pijlen hadden samenvallende begin- en eindpunten en zijn niet als zichtbare lijn meegeteld.");
+    if (rawArrows.length !== sourceArrows.length)
+      warnings.push("Ongeldige of te korte passpijlen niet getekend: analyseer opnieuw of teken ze handmatig.");
     if (sourceArrows.length && sourceArrows.every((v) => (v as Record<string, unknown>).type === "guideLine"))
       warnings.push("Pijltypes zijn onzeker: alle lijnen als algemene hulplijn gedetecteerd.");
     if (conePixelsCredible && coneAnchors.length !== physicalSource.filter((obj) => (obj as Record<string, unknown>).type === "cone").length) warnings.push("Aantal AI-pylonnen wijkt af van de gemeten foto: de fotopixels zijn gebruikt.");
