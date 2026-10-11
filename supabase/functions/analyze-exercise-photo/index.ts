@@ -941,7 +941,61 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // The color-based shirt detector is advisory. Only replace a shirt center
     // when the same-color inventory and detected pixel count agree.
     const pixelAnchored = anchorObjects(reliablePhysical, "player", playerAnchors);
-    const sourceObjects = [...pixelAnchored, ...sourceArrows];
+    // Seven independent semantic layers. Classifying and mapping a layer must
+    // never use another layer's positions, inferred formations or count.
+    const asObject = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
+    const sourcePlayers = pixelAnchored.filter((value) => asObject(value).type === "player");
+    const supportByPosition = sourcePlayers.filter((value) => {
+      const p = asObject(value);
+      return String(p.shirtColor).toLowerCase() === "blue" ||
+        String(p.label).toLowerCase() === "steunspeler";
+    });
+    const coaches = sourcePlayers.filter((value) =>
+      String(asObject(value).label ?? "").trim().toUpperCase() === "T");
+    const fieldPlayers = sourcePlayers.filter((value) =>
+      !supportByPosition.includes(value) && !coaches.includes(value));
+    const distinctTeams = [...new Set(fieldPlayers.map((value) =>
+      String(asObject(value).shirtColor ?? "unknown").toLowerCase()))];
+    const teamColors = distinctTeams.sort((a, b) =>
+      fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === b).length -
+      fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === a).length);
+    const layerSources = {
+      cones: pixelAnchored.filter((v) => asObject(v).type === "cone" || asObject(v).type === "hat"),
+      team1: fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === teamColors[0]),
+      team2: fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === teamColors[1]),
+      trainer: [...coaches, ...pixelAnchored.filter((v) => asObject(v).type === "trainer")],
+      passLines: sourceArrows.filter((v) => asObject(v).type === "passLine" || asObject(v).type === "guideLine"),
+      runLines: sourceArrows.filter((v) => asObject(v).type === "runLine"),
+      supportPlayers: supportByPosition,
+    };
+    // Preserve other detected colors and object types; do not drop them
+    // merely because this seven-layer interface has only two named teams.
+    const remainder = pixelAnchored.filter((v) =>
+      !Object.values(layerSources).some((layer) => layer.includes(v)));
+    const layerOrder = ["cones", "team1", "team2", "trainer", "passLines", "runLines", "supportPlayers"] as const;
+    const layers = {} as Record<typeof layerOrder[number], {
+      status: "ok" | "warning" | "empty";
+      detected: number; placed: number; reason: string; items: Array<Record<string, unknown>>;
+    }>;
+    for (const layer of layerOrder) {
+      const raw = layerSources[layer];
+      const items = normalizedItems(raw, calibration);
+      const reasons: string[] = [];
+      if (items.length !== raw.length) reasons.push("Niet alle objecten hebben geldige broncoördinaten.");
+      if (layer === "cones" && !conePixelsCredible && raw.length)
+        reasons.push("Pylonnen uit AI-coördinaten: geen betrouwbare pixelmeting beschikbaar.");
+      if ((layer === "team1" || layer === "team2" || layer === "supportPlayers") &&
+          raw.length && !playerAnchors.length)
+        reasons.push("Geen betrouwbare shirt-pixelmeting beschikbaar; AI-posities gebruikt.");
+      if ((layer === "passLines" || layer === "runLines") && raw.length)
+        reasons.push("Lijnpunten komen uit vision: controleer begin, eind en richting op de overlay.");
+      layers[layer] = {
+        status: !raw.length ? "empty" : reasons.length ? "warning" : "ok",
+        detected: raw.length, placed: items.length, reason: reasons.join(" "),
+        items,
+      };
+    }
+    const sourceObjects = [...layerOrder.flatMap((layer) => layerSources[layer]), ...remainder];
     const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
       // Grey playing jerseys are displayed as black; retain grey coach T.
       if (item.type === "player" && item.shirtColor === "grey" &&
@@ -976,6 +1030,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       // Keep source field crop for a pixel-aligned overlay on the editor.
       field_calibration: calibration,
       import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings },
+      layers,
     });
   } catch {
     return json({ error: "Could not analyze this image." }, 500);
