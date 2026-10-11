@@ -1375,14 +1375,22 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       // If the models disagree, accept only ONE distinct directed relation
       // that independently matches the actual photographed tail and arrowhead.
       // Multiple geometrically plausible relations remain unresolved.
+      // Independently validate each proposed directed relation. A voting
+      // majority alone must never move an arrow to a different jersey.
       const plausible = [a, b, c].filter(fitsMeasuredArrow);
       const uniquePlausible = plausible.filter((candidate, index) =>
         plausible.findIndex((other) => sameEndpoints(candidate, other)) === index);
-      const pixelVerified = !agreed && uniquePlausible.length === 1 ? uniquePlausible[0] : undefined;
-      const fallback = a ?? b ?? c;
-      const selected = agreed ?? pixelVerified ?? fallback;
-      return selected ? [{ ...selected, agreed: Boolean(agreed || pixelVerified),
-        pixelVerified: Boolean(pixelVerified) }] : [];
+      // Consensus is not evidence when the claimed arrow endpoints do not
+      // physically meet those players. Prefer a uniquely geometry-verified
+      // directed edge over an invalid majority guess.
+      const pixelVerified = uniquePlausible.length === 1 ? uniquePlausible[0] : undefined;
+      const consensusVerified = agreed && fitsMeasuredArrow(agreed) ? agreed : undefined;
+      const selected = pixelVerified ?? consensusVerified ?? agreed ?? a ?? b ?? c;
+      const verified = Boolean(selected && fitsMeasuredArrow(selected) &&
+        (pixelVerified || consensusVerified));
+      return selected ? [{ ...selected, agreed: verified,
+        pixelVerified: Boolean(verified && pixelVerified &&
+          sameEndpoints(selected, pixelVerified)) }] : [];
     });
     // Expose the AI's interpretation as diagnostics even when geometry rejects
     // a connection. Never present an unvalidated guess as a confirmed route.
