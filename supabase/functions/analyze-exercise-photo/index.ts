@@ -1707,6 +1707,31 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     for (const [type, count] of Object.entries(inventoryCounts)) {
       if ((outputCounts[type] || 0) < count) warnings.push(`Niet alle herkende ${type}-objecten zijn geplaatst.`);
     }
+    // Diagnostic-only snapshot. These values must NEVER feed back into layout,
+    // player numbering, snapping or the AI inference.
+    const fmtCoord = (value: unknown) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(4) : "ongeldig";
+    };
+    const shirtCoords = actorItems.map((shirt, id) => ({
+      id, type: String(shirt.type), color: String(shirt.shirtColor ?? shirt.color ?? "?"),
+      number: String(shirt.label ?? shirt.number ?? "-"),
+      x: Number(shirt.x), y: Number(shirt.y),
+    }));
+    const arrowCoords = canvasArrows.map((arrow, id) => ({
+      id: id + 1, type: String(arrow.type),
+      photo: arrowRequests[id] ?? null,
+      canvas: { x: Number(arrow.x), y: Number(arrow.y),
+        x2: Number(arrow.x2), y2: Number(arrow.y2) },
+      relation: lineConnections[id] ?? null,
+    }));
+    warnings.push("DEBUG COÖRDINATEN (0–1; foto = bron, canvas = eindresultaat):");
+    shirtCoords.forEach(shirt => warnings.push(
+      `Shirt #${shirt.id} [${shirt.type}, ${shirt.color}, rugnr ${shirt.number}]: center (${fmtCoord(shirt.x)}, ${fmtCoord(shirt.y)})`
+    ));
+    arrowCoords.forEach(arrow => warnings.push(
+      `Pijl #${arrow.id} [${arrow.type}; ${arrow.relation?.status ?? "onbekend"}; ${arrow.relation?.from ?? "?"} → ${arrow.relation?.to ?? "?"}]: bron (${fmtCoord(arrow.photo?.x)}, ${fmtCoord(arrow.photo?.y)}) → (${fmtCoord(arrow.photo?.x2)}, ${fmtCoord(arrow.photo?.y2)}); canvas (${fmtCoord(arrow.canvas.x)}, ${fmtCoord(arrow.canvas.y)}) → (${fmtCoord(arrow.canvas.x2)}, ${fmtCoord(arrow.canvas.y2)})`
+    ));
     const safeText = (v: unknown) => typeof v === "string" ? v.slice(0, 4000) : "";
     return json({
       title: safeText(parsed.title).slice(0, 160),
@@ -1716,7 +1741,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       board_layout: { fieldMode: "half", fieldOrientation: "top", items: uniqueItems },
       // Keep source field crop for a pixel-aligned overlay on the editor.
       field_calibration: calibration,
-      import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings, lineConnections },
+      import_audit: { inventory: inventoryCounts, placed: outputCounts, warnings, lineConnections, coordinateDebug: { shirts: shirtCoords, arrows: arrowCoords, calibration } },
       layers,
     });
   } catch {
