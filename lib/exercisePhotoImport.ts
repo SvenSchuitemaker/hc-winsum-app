@@ -19,6 +19,7 @@ export type ExercisePhotoAnalysis = {
     instructions: string;
     board_layout: ExerciseBoardLayout;
     field_calibration?: { bounds: { left: number; top: number; right: number; bottom: number }; rotation: number; flipHorizontal: boolean };
+    layers?: Record<string, { status: "ok" | "warning" | "empty"; detected: number; placed: number; reason: string; items: ExerciseBoardLayout["items"] }>;
     import_audit?: {
         inventory: Record<string, number>;
         placed: Record<string, number>;
