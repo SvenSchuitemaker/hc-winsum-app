@@ -1469,8 +1469,36 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const pixelVerified = uniquePlausible.length === 1 ? uniquePlausible[0] : undefined;
       const consensusVerified = agreed && fitsMeasuredArrow(agreed) ? agreed : undefined;
       const selected = pixelVerified ?? consensusVerified ?? agreed ?? a ?? b ?? c;
-      const verified = Boolean(selected && fitsMeasuredArrow(selected) &&
-        (pixelVerified || consensusVerified));
+      // A drawn arrow can terminate slightly outside a jersey icon. For a
+      // disputed connection accepted independently by 2 readings, tolerate
+      // that gap ONLY when both endpoints are still near their actors and
+      // the measured arrow faces in the same direction. Never use this for a
+      // single unsupported guess or for moving another layer.
+      const consensusNearArrow = Boolean(agreed && (() => {
+        const from = photoActors[Number(agreed.fromActorId)];
+        const to = photoActors[Number(agreed.toActorId)];
+        const tail = agreed.tail, tip = agreed.tip;
+        if (!from || !to || !tail || !tip || ![tail.x, tail.y, tip.x, tip.y].every(
+          (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1)) return false;
+        const d1 = Math.hypot(tail.x - from.x, tail.y - from.y);
+        const d2 = Math.hypot(tip.x - to.x, tip.y - to.y);
+        const arrowLength = Math.hypot(tip.x - tail.x, tip.y - tail.y);
+        const actorLength = Math.hypot(to.x - from.x, to.y - from.y);
+        if (d1 > 0.115 || d2 > 0.115 || arrowLength < 0.025 || actorLength < 0.025)
+          return false;
+        const dot = ((tip.x - tail.x) * (to.x - from.x) +
+          (tip.y - tail.y) * (to.y - from.y)) / (arrowLength * actorLength);
+        if (dot < 0.85) return false;
+        return !photoActors.some((actor) => actor.id !== from.id &&
+          Math.hypot(actor.x - tail.x) + Math.abs(actor.y - tail.y) + 0.02 <
+          Math.hypot(from.x - tail.x) + Math.abs(from.y - tail.y)) &&
+          !photoActors.some((actor) => actor.id !== to.id &&
+          Math.hypot(actor.x - tip.x) + Math.abs(actor.y - tip.y) + 0.02 <
+          Math.hypot(to.x - tip.x) + Math.abs(to.y - tip.y));
+      })());
+      const verified = Boolean(selected &&
+        (fitsMeasuredArrow(selected) || (sameEndpoints(selected, agreed) && consensusNearArrow)) &&
+        (pixelVerified || consensusVerified || consensusNearArrow));
       return selected ? [{ ...selected, agreed: verified,
         pixelVerified: Boolean(verified && pixelVerified &&
           sameEndpoints(selected, pixelVerified)) }] : [];
@@ -1565,8 +1593,13 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         Math.max(0.000001, arrowLength * actorLength);
       // The source and destination must agree with the measured visible
       // endpoints. Allow margin for jerseys' physical size, not large jumps.
-      if (arrowLength < 0.025 || tailError > 0.085 || tipError > 0.085 ||
-          directionDot < 0.75) {
+      // Independently agreed routes already passed the guarded relaxed
+      // endpoint check above. Preserve the strict path for every other line.
+      const consensusEndpointMargin = Boolean(raw.agreed && !raw.pixelVerified);
+      const maxError = consensusEndpointMargin ? 0.115 : 0.085;
+      const minDot = consensusEndpointMargin ? 0.85 : 0.75;
+      if (arrowLength < 0.025 || tailError > maxError || tipError > maxError ||
+          directionDot < minDot) {
         rejectedActorConnections++;
         continue;
       }
