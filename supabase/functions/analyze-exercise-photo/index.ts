@@ -1027,7 +1027,43 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
                    Number(other.y2) - Number(candidate.y2)) < 0.028);
       if (!duplicateTip) focusedUnique.push(candidate);
     }
-    const rawArrows = focusedUnique.length ? focusedUnique : genericNormalized;
+    // Focused tracing occasionally misses the final arrow, even though the
+    // general image pass saw its ink. Recover ONLY an independently seen,
+    // geometrically distinct stroke whose endpoints are next to actual shirts.
+    // Never recover lines by assuming a tactical sequence or expected count.
+    const shirtAnchors = physicalSource.flatMap((item) => {
+      const actor = item as Record<string, unknown>;
+      if (!["player", "attacker", "defender"].includes(String(actor.type)) ||
+          String(actor.label ?? "").trim().toUpperCase() === "T") return [];
+      const x = Number(actor.x), y = Number(actor.y);
+      return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
+    });
+    const nearShirt = (p: { x: number; y: number }) =>
+      shirtAnchors.some((actor) => Math.hypot(actor.x - p.x, actor.y - p.y) <= 0.105);
+    const sameStroke = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+      const tail = { x: Number(a.x), y: Number(a.y) };
+      const tip = { x: Number(a.x2), y: Number(a.y2) };
+      const otherTail = { x: Number(b.x), y: Number(b.y) };
+      const otherTip = { x: Number(b.x2), y: Number(b.y2) };
+      const distance = (p: typeof tail, q: typeof tail) => Math.hypot(p.x - q.x, p.y - q.y);
+      // Compare both ends, not just arrowhead: two different passes may share a receiver.
+      return (distance(tail, otherTail) < 0.075 && distance(tip, otherTip) < 0.075) ||
+        (distance(tail, otherTip) < 0.075 && distance(tip, otherTail) < 0.075);
+    };
+    const rawArrows = [...focusedUnique];
+    if (!rawArrows.length) rawArrows.push(...genericNormalized);
+    else for (const candidate of genericNormalized) {
+      if (rawArrows.some((existing) => sameStroke(existing, candidate))) continue;
+      const tail = { x: Number(candidate.x), y: Number(candidate.y) };
+      const tip = { x: Number(candidate.x2), y: Number(candidate.y2) };
+      // The generic reading must have plausible physical endpoints on TWO
+      // playing jerseys. Ambiguous loose arrows are not silently added.
+      if (!nearShirt(tail) || !nearShirt(tip)) continue;
+      if (rawArrows.some((existing) =>
+        Math.hypot(Number(existing.x2) - tip.x, Number(existing.y2) - tip.y) < 0.04 &&
+        Math.hypot(Number(existing.x) - tail.x, Number(existing.y) - tail.y) < 0.12)) continue;
+      rawArrows.push(candidate);
+    }
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
     let endpointChecks: unknown[] = [];
