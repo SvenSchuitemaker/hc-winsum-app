@@ -244,6 +244,38 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
 
 
 /**
+ * Verify ONLY the endpoints of already traced arrows in a second vision pass.
+ * A disagreement never moves any physical object and never creates a line.
+ */
+async function verifyArrowEndpoints(key: string, model: string, mimeType: string,
+  base64: string, arrows: Array<Record<string, unknown>>): Promise<unknown[]> {
+  if (!arrows.length) return [];
+  const candidates = arrows.slice(0, 20).map((arrow, i) => ({
+    id: i, x: arrow.x, y: arrow.y, x2: arrow.x2, y2: arrow.y2,
+  }));
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model, temperature: 0, response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "Independently VERIFY the exact visible tail and arrowhead TIP of each already identified black arrow in a hockey diagram. Return {items:[{id,x,y,x2,y2}]} with original-image normalized coordinates 0..1. ID must be the candidate index. Trace real black ink, not tactical meaning or nearby shirt locations. A tail begins where the actual stroke begins; x2,y2 must be the precise arrowhead TIP. Do not shift endpoints to a nearby player or cone. Skip any candidate that cannot be followed visually. Do not generate additional arrows." },
+        { role: "user", content: [
+          { type: "text", text: `Re-check these candidate strokes against the image itself: ${JSON.stringify(candidates)}. Return only independently visible precise endpoints.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ] },
+      ],
+    }),
+  });
+  if (!response.ok) return [];
+  const result = await response.json();
+  try {
+    const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.items) ? parsed.items : [];
+  } catch { return []; }
+}
+
+/**
  * Independently read visible jersey numbers AFTER the geometry pass. This
  * stage is advisory: it must never create a player or move a pixel anchor.
  * A failed audit leaves the original reconstruction intact.
@@ -907,9 +939,36 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // general-pass arrows when dedicated analysis returned usable strokes.
     // Independent arrow layer; never modify player or support-player coordinates.
     const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
+    // Verify end points without ever touching the seven other independent
+    // object layers. Reject large or reversed corrections as uncertain.
+    let endpointChecks: unknown[] = [];
+    try {
+      endpointChecks = await verifyArrowEndpoints(key!, visionModel, mimeType, base64, rawArrows);
+    } catch { /* Keep original arrows when verification is unavailable. */ }
+    let verifiedEndpoints = 0;
+    const candidateArrows = rawArrows.map((item, i) => {
+      const checks = endpointChecks.filter((v) => v && typeof v === "object" &&
+        Number((v as Record<string, unknown>).id) === i);
+      if (checks.length !== 1) return item;
+      const normalized = normalizeArrowCoordinates(checks[0]);
+      if (!normalized) return item;
+      const dx = Number(normalized.x) - Number(item.x);
+      const dy = Number(normalized.y) - Number(item.y);
+      const ex = Number(normalized.x2) - Number(item.x2);
+      const ey = Number(normalized.y2) - Number(item.y2);
+      if (Math.hypot(dx, dy) > 0.16 || Math.hypot(ex, ey) > 0.16) return item;
+      const firstDx = Number(item.x2) - Number(item.x);
+      const firstDy = Number(item.y2) - Number(item.y);
+      const nextDx = Number(normalized.x2) - Number(normalized.x);
+      const nextDy = Number(normalized.y2) - Number(normalized.y);
+      if (firstDx * nextDx + firstDy * nextDy <= 0) return item;
+      verifiedEndpoints++;
+      return { ...item, x: normalized.x, y: normalized.y,
+        x2: normalized.x2, y2: normalized.y2 };
+    });
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
-    const sourceArrows = rawArrows.map((value) => {
+    const sourceArrows = candidateArrows.map((value) => {
       const arrow = value as Record<string, unknown>;
       if (!arrow || !lineTypes.has(String(arrow.type))) return value;
       // A guideLine is genuinely ambiguous; render it, but never automatically
@@ -1141,6 +1200,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (sourceArrows.length && verifiedEndpoints < sourceArrows.length)
+      warnings.push(`Pijlpuntcontrole bevestigd: ${verifiedEndpoints}/${sourceArrows.length}. Niet-bevestigde lijnen behouden hun eerdere coördinaten.`);
     if (arrowItems.length && focusedNormalized.length !== arrowItems.length)
       warnings.push("Sommige herkende pijlen hadden ongeldige, niet-genormaliseerde of samenvallende eindpunten. Alleen werkelijk tekenbare lijnen zijn meegenomen.");
     if (sourceArrows.length === 0 && (arrowItems.length || genericNormalized.length))
