@@ -867,10 +867,19 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
     const physicalSource = sourceVisualItems.filter((item) =>
       !!item && typeof item === "object" && !lineTypes.has(String((item as Record<string, unknown>).type)));
-    const sourceArrows = arrowItems.length ? arrowItems
+    const rawArrows = arrowItems.length ? arrowItems
       : Array.isArray(parsed.items)
         ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
         : [];
+    // Generic guideLine detections of clearly directional diagram arrows must
+    // render as actual pass arrows, not faint dotted field guides.
+    // Preserve their original endpoints; do not snap them to player centers.
+    const sourceArrows = rawArrows.map((value) => {
+      const arrow = value as Record<string, unknown>;
+      if (arrow?.type !== "guideLine") return value;
+      return { ...arrow, type: "passLine", strokeColor: "#111111",
+        dashed: false, arrowHead: true, lineStyle: "straight" };
+    });
 
     // Image-pixel centers can correct approximate AI geometry, but must NEVER
     // change the inventory count, identity or color. Match in ORIGINAL image
@@ -968,6 +977,28 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // green markings and individual number glyphs can pass the pixel mask.
     // Keep the AI inventory as the sole authority on physical shirt count.
     const recoveredPhysical = [...pixelAnchored];
+    // A source-pixel component is eligible as a missing orange jersey only if
+    // it is isolated from every inventoried shirt and all other pixel anchors.
+    // Do not infer a player from tactical formations or fixed team sizes.
+    const orangeInventory = recoveredPhysical.filter((v) => {
+      const item = v as Record<string, unknown>;
+      return item.type === "player" && item.shirtColor === "orange";
+    }) as Record<string, unknown>[];
+    const orangePixels = playerAnchors.filter((p) => p.shirtColor === "orange");
+    if (orangePixels.length === orangeInventory.length + 1 && orangeInventory.length >= 1) {
+      const unmatched = orangePixels.filter((candidate) =>
+        !orangeInventory.some((shirt) =>
+          Math.hypot(Number(shirt.x) - candidate.x, Number(shirt.y) - candidate.y) < 0.075));
+      if (unmatched.length === 1 && recoveredPhysical.every((v) => {
+        const item = v as Record<string, unknown>;
+        return item.type !== "player" ||
+          Math.hypot(Number(item.x) - unmatched[0].x, Number(item.y) - unmatched[0].y) > 0.055;
+      })) {
+        // Unknown jersey number is intentionally left blank rather than guessed.
+        recoveredPhysical.push({ type: "player", shirtColor: "orange",
+          x: unmatched[0].x, y: unmatched[0].y, label: "" });
+      }
+    }
     // Seven independent semantic layers. Classifying and mapping a layer must
     // never use another layer's positions, inferred formations or count.
     const asObject = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
