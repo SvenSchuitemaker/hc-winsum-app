@@ -1041,12 +1041,15 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const sourceArrows = candidateArrows.map((value) => {
       const arrow = value as Record<string, unknown>;
       if (!arrow || !lineTypes.has(String(arrow.type))) return value;
-      // A guideLine is genuinely ambiguous; render it, but never automatically
-      // mislabel an uncertain movement as a pass or drop a classified runLine.
-      // Solid directional arrows from the photo are pass lines. Keep dashed
-      // movement arrows and explicitly classified run lines separate.
-      const isSolidArrow = arrow.type === "guideLine" &&
-        arrow.dashed !== true && arrow.arrowHead !== false;
+      // Classify the VISUAL stroke, independently of its sender/receiver.
+      // Vision sometimes calls a solid straight pass an explicit runLine;
+      // previously we corrected only guideLine, so the false runLine survived.
+      // A genuinely dashed or zigzag running path retains its original type.
+      const style = String(arrow.lineStyle ?? "straight").toLowerCase();
+      const isMovementStyle = arrow.dashed === true ||
+        style === "zigzag" || style === "bounce";
+      const isSolidArrow = !isMovementStyle && arrow.arrowHead !== false &&
+        (arrow.type === "guideLine" || arrow.type === "runLine");
       return { ...arrow, type: isSolidArrow ? "passLine" : arrow.type,
         strokeColor: "#111111", dashed: arrow.dashed === true,
         arrowHead: true,
@@ -1327,7 +1330,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           !actorItems[fromId] || !actorItems[toId]) continue;
       lineConnections[lineId] = {
         line: lineId + 1, from: describeActor(fromId), to: describeActor(toId),
-        type: value.type === "runLine" ? "runLine" : "passLine", status: "voorgesteld",
+        type: String(canvasArrows[lineId]?.type ?? "guideLine"), status: "voorgesteld",
       };
     }
     let connectedLineCount = 0;
@@ -1383,7 +1386,10 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         continue;
       }
       item.x = from.x; item.y = from.y; item.x2 = to.x; item.y2 = to.y;
-      item.type = raw.type;
+      // The actor-relation vision pass determines endpoints only. It must
+      // never silently change an already classified pass into a run line.
+      // Preserve the source-arrow style classification.
+      item.type = item.type;
       usedConnectionLines.add(lineId);
       lineConnections[lineId].status = "bevestigd";
       connectedLineCount++;
