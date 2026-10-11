@@ -1293,6 +1293,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const connections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
       photoActors, arrowRequests);
     let connectedLineCount = 0;
+    let rejectedActorConnections = 0;
     const usedConnectionLines = new Set<number>();
     for (const raw of connections) {
       if (!raw) continue;
@@ -1307,6 +1308,37 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       if (raw.type !== "passLine" && raw.type !== "runLine") continue;
       const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
       if (Math.hypot(dx, dy) < 0.025) continue;
+      // The model can identify the wrong shirt even when both IDs exist.
+      // Compare the claimed relation to the visible source stroke BEFORE
+      // snapping to jersey centres, using the calibrated canvas space.
+      const ax = Number(item.x), ay = Number(item.y);
+      const bx = Number(item.x2), by = Number(item.y2);
+      const segmentDX = bx - ax, segmentDY = by - ay;
+      const segmentLen = Math.hypot(segmentDX, segmentDY);
+      const actorLen = Math.hypot(dx, dy);
+      if (segmentLen < 0.02) continue;
+      const similarity = (segmentDX * dx + segmentDY * dy) /
+        (segmentLen * actorLen);
+      const sourceError = Math.hypot(Number(from.x) - ax, Number(from.y) - ay);
+      const destError = Math.hypot(Number(to.x) - bx, Number(to.y) - by);
+      // A line may stop at a jersey edge; substantial jumps to a completely
+      // different player or reversal are not an acceptable connection.
+      if (similarity < 0.5 || sourceError > 0.20 || destError > 0.20) { rejectedActorConnections++; continue; }
+      // Don't select an AI-proposed pair if some other two real actor centres
+      // fit the drawn stroke MUCH better. This specifically blocks a false
+      // long diagonal from one black shirt to the opposite blue supporter.
+      const actorDistance = sourceError + destError;
+      const nearestPairScore = actorItems.reduce((best, a) =>
+        Math.min(best, actorItems.reduce((inner, b) => {
+          if (a === b) return inner;
+          const sdx = Number(b.x) - Number(a.x);
+          const sdy = Number(b.y) - Number(a.y);
+          if (sdx * segmentDX + sdy * segmentDY <= 0) return inner;
+          return Math.min(inner,
+            Math.hypot(Number(a.x) - ax, Number(a.y) - ay) +
+            Math.hypot(Number(b.x) - bx, Number(b.y) - by));
+        }, Infinity)), Infinity);
+      if (actorDistance > nearestPairScore + 0.10) { rejectedActorConnections++; continue; }
       // The source-end geometry is frequently wrong (the reason for this
       // feature). Do NOT reject a vision-identified relation because the
       // earlier approximate arrow points in another direction. The separately
@@ -1329,6 +1361,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (rejectedActorConnections)
+      warnings.push(`${rejectedActorConnections} onzekere spelerverbinding(en) geweigerd: ze pasten niet bij de plaats en richting van de getekende pijl.`);
     if (canvasArrows.length && connectedLineCount < canvasArrows.length)
       warnings.push(`Speler-naar-speler verbindingen: ${connectedLineCount}/${canvasArrows.length} bevestigd; overige pijlen gebruiken de foto-coördinaten.`);
     if (focusedUnique.length && genericNormalized.length && focusedUnique.length !== genericNormalized.length)
