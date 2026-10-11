@@ -886,42 +886,38 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }) : [];
     const coneAnchors = validAnchors(body?.detectedCones);
     const playerAnchors = validAnchors(body?.detectedPlayers);
+    // Assign measured centers only when the per-color detection is complete.
+    // A one-to-one match is not enough on its own: require a unique nearby
+    // source object so two adjacent numbered shirts are never exchanged.
     const anchorObjects = (values: unknown[], type: string, anchors: PixelAnchor[]) => {
       const updated = [...values];
-      const entries = values.flatMap((value, index) => {
-        if (!value || typeof value !== "object") return [];
-        const item = value as Record<string, unknown>;
-        if (item.type !== type || !Number.isFinite(Number(item.x)) ||
-          !Number.isFinite(Number(item.y))) return [];
-        return [{ index, item }];
-      });
-      if (!entries.length || !anchors.length) return updated;
-      // Protect the inventory against false-positive pixel components.
-      // An equal count for each shirt color is required before pixel anchors
-      // replace player positions. For cones use exact inventory counts.
-      const groups = type === "player"
-        ? ["black", "grey", "orange", "blue", "white", "red", "green"] : [""];
+      if (type !== "player" || !anchors.length) return updated;
+      const groups = ["orange", "black", "grey", "blue", "white", "red", "green"];
       for (const color of groups) {
-        const entryGroup = entries.filter(({ item }) => type !== "player" ||
-          String(item.shirtColor ?? "").toLowerCase() === color);
-        const pixelGroup = anchors.filter((p) => type !== "player" || p.shirtColor === color);
-        if (!entryGroup.length || entryGroup.length !== pixelGroup.length) continue;
-        // Minimum-total-distance bijection: assign every pixel to one item.
-        // Sorted candidate pairs prevent two nearby shirts sharing an anchor.
-        const pairs = entryGroup.flatMap(({ index, item }) => pixelGroup.map((p, pixelIndex) => ({
-          index, pixelIndex, p,
-          distance: Math.hypot(Number(item.x) - p.x, Number(item.y) - p.y),
-        }))).sort((a, b) => a.distance - b.distance);
-        const usedEntries = new Set<number>(), usedPixels = new Set<number>();
-        for (const match of pairs) {
-          if (usedEntries.has(match.index) || usedPixels.has(match.pixelIndex)) continue;
-          if (match.distance > 0.32) continue; // Never move across unrelated field regions.
-          updated[match.index] = {
-            ...(updated[match.index] as Record<string, unknown>),
-            x: match.p.x, y: match.p.y,
-          };
-          usedEntries.add(match.index);
-          usedPixels.add(match.pixelIndex);
+        const entries = values.flatMap((raw, index) => {
+          const item = raw as Record<string, unknown>;
+          if (item?.type !== "player" || String(item.shirtColor).toLowerCase() !== color ||
+              !Number.isFinite(Number(item.x)) || !Number.isFinite(Number(item.y))) return [];
+          return [{ index, item }];
+        });
+        const pixels = anchors.filter((p) => p.shirtColor === color);
+        if (!entries.length || entries.length !== pixels.length) continue;
+        const distances = entries.flatMap((entry) => pixels.map((pixel, pixelIndex) => ({
+          index: entry.index, pixelIndex, pixel,
+          d: Math.hypot(Number(entry.item.x) - pixel.x, Number(entry.item.y) - pixel.y),
+        }))).sort((a, b) => a.d - b.d);
+        const claimedItems = new Set<number>(), claimedPixels = new Set<number>();
+        for (const candidate of distances) {
+          if (candidate.d > 0.07 || claimedItems.has(candidate.index) ||
+              claimedPixels.has(candidate.pixelIndex)) continue;
+          const ambiguous = distances.some((other) => other !== candidate &&
+            (other.index === candidate.index || other.pixelIndex === candidate.pixelIndex) &&
+            other.d < candidate.d + 0.012);
+          if (ambiguous) continue;
+          const old = updated[candidate.index] as Record<string, unknown>;
+          updated[candidate.index] = { ...old, x: candidate.pixel.x, y: candidate.pixel.y };
+          claimedItems.add(candidate.index);
+          claimedPixels.add(candidate.pixelIndex);
         }
       }
       return updated;
@@ -945,40 +941,11 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // Only recover a shirt if the pixel anchor is unique, not already matched,
     // and has a sufficiently distinct compact color. This never uses cone
     // positions or a presumed team size/formation.
+    // The independently measured pixels may refine EXISTING detections, but
+    // never provide enough evidence to create a numbered player. In particular
+    // green markings and individual number glyphs can pass the pixel mask.
+    // Keep the AI inventory as the sole authority on physical shirt count.
     const recoveredPhysical = [...pixelAnchored];
-    const usablePlayerPixels = playerAnchors.filter((p) =>
-      ["orange", "blue", "black", "grey"].includes(String(p.shirtColor)));
-    const pixelColor = (v: unknown) => {
-      const color = String(v ?? "").toLowerCase();
-      return color === "grey" ? "black" : color;
-    };
-    const existingShirts = recoveredPhysical.filter((v) =>
-      (v as Record<string, unknown>).type === "player") as Record<string, unknown>[];
-    // Only fill an undercount when a consistent pixel cluster indicates it.
-    // No recovery from a lone isolated dark pixel/field annotation.
-    const groups = ["orange", "blue", "black"] as const;
-    for (const color of groups) {
-      const sources = usablePlayerPixels.filter((p) => pixelColor(p.shirtColor) === color);
-      const present = existingShirts.filter((p) =>
-        pixelColor(p.shirtColor) === color && String(p.label ?? "").toUpperCase() !== "T");
-      if (sources.length <= present.length || sources.length > 25 ||
-          sources.length - present.length > 2) continue;
-      const candidates = sources.filter((p) =>
-        !present.some((v) => Math.hypot(Number(v.x) - p.x, Number(v.y) - p.y) < 0.055));
-      for (const candidate of candidates) {
-        // An extra image component close to another physical object is
-        // ambiguous (especially text, field marks or a jersey outline).
-        if (existingShirts.some((v) =>
-            Math.hypot(Number(v.x) - candidate.x, Number(v.y) - candidate.y) < 0.042)) continue;
-        if (candidates.some((p) => p !== candidate &&
-            Math.hypot(p.x - candidate.x, p.y - candidate.y) < 0.03)) continue;
-        const recovered = {
-          type: "player", shirtColor: color, x: candidate.x, y: candidate.y, label: "",
-        };
-        recoveredPhysical.push(recovered);
-        existingShirts.push(recovered);
-      }
-    }
     // Seven independent semantic layers. Classifying and mapping a layer must
     // never use another layer's positions, inferred formations or count.
     const asObject = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
@@ -1056,6 +1023,11 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
     if (!inventoryItems?.length) warnings.push("Aparte inventarisatie niet beschikbaar: controleer de aantallen.");
+    if (playerAnchors.length && playerAnchors.length !== physicalSource.filter((v) =>
+      (v as Record<string, unknown>).type === "player").length)
+      warnings.push("Shirt-pixeltelling verschilt van AI-inventaris: geen extra spelers aangemaakt; controleer ontbrekende of dubbel gedetecteerde shirts.");
+    if (sourceArrows.length && sourceArrows.every((v) => (v as Record<string, unknown>).type === "guideLine"))
+      warnings.push("Pijltypes zijn onzeker: alle lijnen als algemene hulplijn gedetecteerd.");
     if (conePixelsCredible && coneAnchors.length !== physicalSource.filter((obj) => (obj as Record<string, unknown>).type === "cone").length) warnings.push("Aantal AI-pylonnen wijkt af van de gemeten foto: de fotopixels zijn gebruikt.");
     for (const [type, count] of Object.entries(inventoryCounts)) {
       if ((outputCounts[type] || 0) < count) warnings.push(`Niet alle herkende ${type}-objecten zijn geplaatst.`);
