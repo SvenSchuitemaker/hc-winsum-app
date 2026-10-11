@@ -281,6 +281,39 @@ async function analyzeActorConnections(
 }
 
 /**
+ * Re-read jersey digits using finalized shirt positions. Pixel-centre matching
+ * can change a jersey's location without changing the OCR label attached to it.
+ * Keep positions immutable: only accept unambiguous, unique digits per team.
+ */
+async function verifyJerseyNumbers(
+  key: string, model: string, mimeType: string, base64: string,
+  actors: Array<{ id: number; x: number; y: number; color: string }>,
+): Promise<Array<{ id: number; number: string }>> {
+  if (!actors.length) return [];
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0, response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content:
+            "Read ONLY the printed jersey digits in this field hockey diagram. Supplied IDs identify individual shirts by their physical source-image centre; IDs are NOT shirt numbers. For each supplied shirt, look precisely at its location and read the actual visible digit. Never assign sequential numbers, infer tactical numbering, swap shirt coordinates, or guess obscured digits. Blue blank supporting shirts and trainer T have no numeric jersey digit. Return JSON {jerseys:[{id,number}]} for confidently readable single numeric digits only. Omit every uncertain reading." },
+          { role: "user", content: [
+            { type: "text", text: `Read the digit printed INSIDE each supplied coloured shirt independently at its actual photo coordinates, not by its order in the list: ${JSON.stringify(actors)}. Do not change locations or create players. Respond only with the requested JSON.` },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+          ] },
+        ],
+      }),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.jerseys) ? parsed.jerseys : [];
+  } catch { return []; }
+}
+
+/**
  * Verify ONLY the endpoints of already traced arrows in a second vision pass.
  * A disagreement never moves any physical object and never creates a line.
  */
@@ -1288,6 +1321,41 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       return { id, x: point.x, y: point.y,
         color: String(item.shirtColor ?? ""), label: String(item.label ?? "") };
     });
+    // Audit OCR after all shirt positions are fixed, before giving numbered
+    // actors to the line-matching model. Never alter a physical layer here.
+    const numberedActors = photoActors.filter((actor) =>
+      ["black", "grey", "orange"].includes(actor.color.toLowerCase()) &&
+      actorItems[actor.id]?.type !== "trainer" &&
+      actor.label.trim().toUpperCase() !== "T");
+    const jerseyReadings = await verifyJerseyNumbers(
+      key!, visionModel, mimeType, base64,
+      numberedActors.map(({ id, x, y, color }) => ({ id, x, y, color })),
+    );
+    const acceptedDigits = new Map<number, string>();
+    const grouped = new Map<string, Array<{ id: number; number: string }>>();
+    const seenIds = new Set<number>();
+    for (const reading of jerseyReadings) {
+      const id = Number(reading?.id);
+      const digit = String(reading?.number ?? "").trim();
+      if (!Number.isInteger(id) || !/^[0-9]$/.test(digit) || seenIds.has(id)) continue;
+      const actor = numberedActors.find((entry) => entry.id === id);
+      if (!actor) continue;
+      seenIds.add(id);
+      const color = actor.color.toLowerCase() === "grey" ? "black" : actor.color.toLowerCase();
+      grouped.set(color, [...(grouped.get(color) ?? []), { id, number: digit }]);
+    }
+    for (const readings of grouped.values()) {
+      const counts = new Map<string, number>();
+      for (const reading of readings) counts.set(reading.number, (counts.get(reading.number) ?? 0) + 1);
+      // Never overwrite labels with conflicting or duplicate OCR output.
+      for (const reading of readings) {
+        if (counts.get(reading.number) === 1) acceptedDigits.set(reading.id, reading.number);
+      }
+    }
+    for (const [id, digit] of acceptedDigits) {
+      actorItems[id].label = digit;
+      photoActors[id].label = digit;
+    }
     const canvasArrows = uniqueItems.filter((item) => lineTypes.has(String(item.type)));
     const rawPhotoArrows = sourceArrows as Array<Record<string, unknown>>;
     const arrowRequests = canvasArrows.map((item, id) => {
