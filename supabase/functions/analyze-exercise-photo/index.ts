@@ -267,7 +267,7 @@ async function analyzeActorConnections(
             "Independently audit the black arrowheads in this field hockey drawing. Ignore tactics and shirt numbers as routing rules. Identify the genuine physical tail and triangular tip of EACH arrow in source-image normalized coordinates. Black solid arrows connect two jerseys only if both endpoints visually touch or clearly point to them. Do not assume a coach/trainer participates merely because its shirt is near a line. Carefully distinguish the line from the coach to the nearest player from the line between a player and a blue support shirt. For each supplied lineId output the two actor IDs only if the actual stroke can be followed from its tail to its arrowhead. Never invent or connect distant unrelated actors. Return JSON {connections:[{lineId,fromActorId,toActorId,type,tail:{x,y},tip:{x,y}}]} with type passLine or runLine." :
             "You are visually TRACING existing black arrows in a field hockey diagram, NOT inferring tactics. Work in this exact sequence for EACH visually distinct arrow: (1) find the physical black stroke; (2) follow the same connected stroke to its triangular pointed arrowhead; (3) locate the opposite non-pointed tail; (4) write down BOTH pixel positions as normalized FULL-IMAGE coordinates [0,1]; (5) only then identify the shirt at or immediately adjacent to the tail (fromActorId) and the shirt at or immediately adjacent to the tip (toActorId). Never infer sender/receiver from shirt colors, labels, or logical gameplay. Do not confuse field markings, the trainer, cones, or unrelated nearby shirts with arrow endpoints. Numbers on shirts are NOT actor IDs; use supplied IDs. Lines may stop at a shirt's border rather than its center. A stroke going into open space has no receiving actor, so OMIT that relation. For each arrow use its closest supplied rough lineId; approximate line coordinates are noisy hints and must not override visible stroke direction. Output ONLY JSON {connections:[{lineId,fromActorId,toActorId,type,tail:{x,y},tip:{x,y}}]} with type passLine or runLine. Include a relation only if each endpoint and both actor identities are visually supported. Do not invent routes or hardcode a sequence." },
           { role: "user", content: [
-            { type: "text", text: `Actors: ${JSON.stringify(actors)}. Rough arrow candidates (not confirmed endpoints): ${JSON.stringify(lines)}. Trace dark arrow pixels first, return measured tail and tip coordinates and their adjacent actor IDs. Use the correct lineId. Do not guess based on tactics.` },
+            { type: "text", text: `Actors: ${JSON.stringify(actors)}. Rough arrow candidates (not confirmed endpoints): ${JSON.stringify(lines)}. For each candidate, identify the ACTUAL TRIANGULAR ARROWHEAD in the image, not the tail. The direction must point TOWARDS the arrowhead; swapping source and target is incorrect even if it connects the same shirts. Trace each visible black stroke independently, and do not merge separate arrows. Return measured tail/tip in source-image coordinates and their adjacent actor IDs. Preserve the candidate lineId. Never guess from field tactics or shirt numbers.` },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
           ] },
         ],
@@ -1313,12 +1313,39 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const id = Number(proposed.lineId);
       if (Number.isInteger(id) && !secondByLine.has(id)) secondByLine.set(id, proposed);
     }
-    const connections = firstConnections.map((first) => {
-      const second = secondByLine.get(Number(first.lineId));
-      if (!second ||
-          Number(first.fromActorId) !== Number(second.fromActorId) ||
-          Number(first.toActorId) !== Number(second.toActorId)) return { ...first, agreed: false };
-      return { ...first, agreed: true };
+    // Keep stable connections untouched. Re-evaluate ONLY disagreements and
+    // candidates absent from the first pass; avoid re-randomizing good arrows.
+    const firstByLine = new Map<number, (typeof firstConnections)[number]>();
+    for (const item of firstConnections) {
+      const id = Number(item.lineId);
+      if (Number.isInteger(id) && !firstByLine.has(id)) firstByLine.set(id, item);
+    }
+    const sameEndpoints = (
+      a: (typeof firstConnections)[number] | undefined,
+      b: (typeof firstConnections)[number] | undefined,
+    ) => Boolean(a && b &&
+      Number(a.fromActorId) === Number(b.fromActorId) &&
+      Number(a.toActorId) === Number(b.toActorId));
+    const disputedLines = arrowRequests.filter((line) =>
+      !sameEndpoints(firstByLine.get(line.id), secondByLine.get(line.id)));
+    const thirdConnections = disputedLines.length ?
+      await analyzeActorConnections(key!, visionModel, mimeType, base64,
+        eligiblePassActors, disputedLines, "verify") : [];
+    const thirdByLine = new Map<number, (typeof firstConnections)[number]>();
+    for (const proposal of thirdConnections) {
+      const id = Number(proposal.lineId);
+      if (Number.isInteger(id) && !thirdByLine.has(id)) thirdByLine.set(id, proposal);
+    }
+    const connections = arrowRequests.flatMap((line) => {
+      const a = firstByLine.get(line.id);
+      const b = secondByLine.get(line.id);
+      const c = thirdByLine.get(line.id);
+      // Two independently measured directed relations must agree. A reversed
+      // pair does NOT count as agreement (the arrowhead is authoritative).
+      const agreed = sameEndpoints(a, b) ? a :
+        sameEndpoints(a, c) ? a : sameEndpoints(b, c) ? b : undefined;
+      const fallback = a ?? b ?? c;
+      return fallback ? [{ ...(agreed ?? fallback), agreed: Boolean(agreed) }] : [];
     });
     // Expose the AI's interpretation as diagnostics even when geometry rejects
     // a connection. Never present an unvalidated guess as a confirmed route.
