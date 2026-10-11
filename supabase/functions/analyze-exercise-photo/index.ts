@@ -1083,6 +1083,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         items,
       };
     }
+    // Keep each layer independent: neither a pass nor a running line may
+    // change the identity, quantity or coordinates of a physical object.
+    // Player and support-player geometry is finalized separately before lines.
     const sourceObjects = [...layerOrder.flatMap((layer) => layerSources[layer]), ...remainder];
     // Never present line type as certain when vision only returned a generic guide.
     // These are editable lines; the user can adjust their tactical meaning.
@@ -1092,48 +1095,6 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           String(item.label ?? "").toUpperCase() !== "T") return { ...item, shirtColor: "black" };
       return item;
     });
-    // Only pass-line geometry is refined. Match endpoints against the already
-    // positioned players (including blue support shirts). Never move a player.
-    // Preserve unmatched endpoints: some genuine passes start in open space.
-    const passAnchors = uniqueItems.filter((item) => item.type === "player" &&
-      Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)));
-    const nearestPassAnchor = (x: number, y: number) => {
-      const matches = passAnchors.map((item) => ({
-        item, distance: Math.hypot(Number(item.x) - x, Number(item.y) - y),
-      })).sort((a, b) => a.distance - b.distance);
-      if (!matches.length || matches[0].distance > 0.11 ||
-          (matches[1] && matches[1].distance - matches[0].distance < 0.025))
-        return null;
-      return matches[0].item;
-    };
-    const usedPassPairs = new Set<string>();
-    let correctedPassEnds = 0;
-    for (const item of uniqueItems) {
-      if (item.type !== "passLine") continue;
-      const startX = Number(item.x), startY = Number(item.y);
-      const endX = Number(item.x2), endY = Number(item.y2);
-      if (![startX, startY, endX, endY].every(Number.isFinite)) continue;
-      const start = nearestPassAnchor(startX, startY);
-      const end = nearestPassAnchor(endX, endY);
-      if (start && (!end || start.id !== end.id)) {
-        item.x = start.x; item.y = start.y; correctedPassEnds++;
-      }
-      if (end && (!start || start.id !== end.id)) {
-        item.x2 = end.x; item.y2 = end.y; correctedPassEnds++;
-      }
-      if (Math.hypot(Number(item.x2) - Number(item.x),
-                     Number(item.y2) - Number(item.y)) < 0.025) {
-        // Reject a degenerate snap: preserve original AI geometry.
-        item.x = startX; item.y = startY; item.x2 = endX; item.y2 = endY;
-      }
-      const pair = start && end && start.id !== end.id ? `${start.id}->${end.id}` : "";
-      if (pair && usedPassPairs.has(pair)) {
-        // Duplicate visual arrows are kept independently editable rather than
-        // deleting an object from the detected inventory.
-        item.x = startX; item.y = startY; item.x2 = endX; item.y2 = endY;
-      }
-      if (pair) usedPassPairs.add(pair);
-    }
     // Geometry and counts are independent. Each accepted inventory object
     // produces exactly one canvas item, including overlapping shirts.
     const countTypes = (values: Array<Record<string, unknown>>) => {
@@ -1147,7 +1108,6 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
-    if (sourceArrows.length && correctedPassEnds === 0) warnings.push("Geen eenduidige spelerankers voor passlijnen gevonden; oorspronkelijke lijncoördinaten behouden.");
     if (arrowItems.length && focusedNormalized.length !== arrowItems.length)
       warnings.push("Sommige herkende pijlen hadden ongeldige, niet-genormaliseerde of samenvallende eindpunten. Alleen werkelijk tekenbare lijnen zijn meegenomen.");
     if (sourceArrows.length === 0 && (arrowItems.length || genericNormalized.length))
