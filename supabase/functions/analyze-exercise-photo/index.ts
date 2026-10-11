@@ -941,10 +941,48 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // The color-based shirt detector is advisory. Only replace a shirt center
     // when the same-color inventory and detected pixel count agree.
     const pixelAnchored = anchorObjects(reliablePhysical, "player", playerAnchors);
+    // Independently measured shirts may expose a missing AI inventory entry.
+    // Only recover a shirt if the pixel anchor is unique, not already matched,
+    // and has a sufficiently distinct compact color. This never uses cone
+    // positions or a presumed team size/formation.
+    const recoveredPhysical = [...pixelAnchored];
+    const usablePlayerPixels = playerAnchors.filter((p) =>
+      ["orange", "blue", "black", "grey"].includes(String(p.shirtColor)));
+    const pixelColor = (v: unknown) => {
+      const color = String(v ?? "").toLowerCase();
+      return color === "grey" ? "black" : color;
+    };
+    const existingShirts = recoveredPhysical.filter((v) =>
+      (v as Record<string, unknown>).type === "player") as Record<string, unknown>[];
+    // Only fill an undercount when a consistent pixel cluster indicates it.
+    // No recovery from a lone isolated dark pixel/field annotation.
+    const groups = ["orange", "blue", "black"] as const;
+    for (const color of groups) {
+      const sources = usablePlayerPixels.filter((p) => pixelColor(p.shirtColor) === color);
+      const present = existingShirts.filter((p) =>
+        pixelColor(p.shirtColor) === color && String(p.label ?? "").toUpperCase() !== "T");
+      if (sources.length <= present.length || sources.length > 25 ||
+          sources.length - present.length > 2) continue;
+      const candidates = sources.filter((p) =>
+        !present.some((v) => Math.hypot(Number(v.x) - p.x, Number(v.y) - p.y) < 0.055));
+      for (const candidate of candidates) {
+        // An extra image component close to another physical object is
+        // ambiguous (especially text, field marks or a jersey outline).
+        if (existingShirts.some((v) =>
+            Math.hypot(Number(v.x) - candidate.x, Number(v.y) - candidate.y) < 0.042)) continue;
+        if (candidates.some((p) => p !== candidate &&
+            Math.hypot(p.x - candidate.x, p.y - candidate.y) < 0.03)) continue;
+        const recovered = {
+          type: "player", shirtColor: color, x: candidate.x, y: candidate.y, label: "",
+        };
+        recoveredPhysical.push(recovered);
+        existingShirts.push(recovered);
+      }
+    }
     // Seven independent semantic layers. Classifying and mapping a layer must
     // never use another layer's positions, inferred formations or count.
     const asObject = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
-    const sourcePlayers = pixelAnchored.filter((value) => asObject(value).type === "player");
+    const sourcePlayers = recoveredPhysical.filter((value) => asObject(value).type === "player");
     const supportByPosition = sourcePlayers.filter((value) => {
       const p = asObject(value);
       return String(p.shirtColor).toLowerCase() === "blue" ||
@@ -960,17 +998,17 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === b).length -
       fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === a).length);
     const layerSources = {
-      cones: pixelAnchored.filter((v) => asObject(v).type === "cone" || asObject(v).type === "hat"),
+      cones: recoveredPhysical.filter((v) => asObject(v).type === "cone" || asObject(v).type === "hat"),
       team1: fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === teamColors[0]),
       team2: fieldPlayers.filter((v) => String(asObject(v).shirtColor).toLowerCase() === teamColors[1]),
-      trainer: [...coaches, ...pixelAnchored.filter((v) => asObject(v).type === "trainer")],
+      trainer: [...coaches, ...recoveredPhysical.filter((v) => asObject(v).type === "trainer")],
       passLines: sourceArrows.filter((v) => asObject(v).type === "passLine" || asObject(v).type === "guideLine"),
       runLines: sourceArrows.filter((v) => asObject(v).type === "runLine"),
       supportPlayers: supportByPosition,
     };
     // Preserve other detected colors and object types; do not drop them
     // merely because this seven-layer interface has only two named teams.
-    const remainder = pixelAnchored.filter((v) =>
+    const remainder = recoveredPhysical.filter((v) =>
       !Object.values(layerSources).some((layer) => layer.includes(v)));
     const layerOrder = ["cones", "team1", "team2", "trainer", "passLines", "runLines", "supportPlayers"] as const;
     const layers = {} as Record<typeof layerOrder[number], {
@@ -996,6 +1034,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       };
     }
     const sourceObjects = [...layerOrder.flatMap((layer) => layerSources[layer]), ...remainder];
+    // Never present line type as certain when vision only returned a generic guide.
+    // These are editable lines; the user can adjust their tactical meaning.
     const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
       // Grey playing jerseys are displayed as black; retain grey coach T.
       if (item.type === "player" && item.shirtColor === "grey" &&
