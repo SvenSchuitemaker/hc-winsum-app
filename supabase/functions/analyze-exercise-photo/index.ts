@@ -889,6 +889,12 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // Assign measured centers only when the per-color detection is complete.
     // A one-to-one match is not enough on its own: require a unique nearby
     // source object so two adjacent numbered shirts are never exchanged.
+    // The AI sometimes invents visually tidy rows even if it counts all shirts.
+    // When the image pixel detector sees precisely the same color inventory,
+    // measured source-image positions MUST replace the AI positions, including
+    // for large displacements. The AI only supplies the shirt identity/number.
+    // Assign labels to pixels using a minimum-distance bijection (not greedy
+    // snapping), leaving the player count and shirt colors unchanged.
     const anchorObjects = (values: unknown[], type: string, anchors: PixelAnchor[]) => {
       const updated = [...values];
       if (type !== "player" || !anchors.length) return updated;
@@ -901,23 +907,34 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           return [{ index, item }];
         });
         const pixels = anchors.filter((p) => p.shirtColor === color);
-        if (!entries.length || entries.length !== pixels.length) continue;
-        const distances = entries.flatMap((entry) => pixels.map((pixel, pixelIndex) => ({
-          index: entry.index, pixelIndex, pixel,
-          d: Math.hypot(Number(entry.item.x) - pixel.x, Number(entry.item.y) - pixel.y),
-        }))).sort((a, b) => a.d - b.d);
-        const claimedItems = new Set<number>(), claimedPixels = new Set<number>();
-        for (const candidate of distances) {
-          if (candidate.d > 0.07 || claimedItems.has(candidate.index) ||
-              claimedPixels.has(candidate.pixelIndex)) continue;
-          const ambiguous = distances.some((other) => other !== candidate &&
-            (other.index === candidate.index || other.pixelIndex === candidate.pixelIndex) &&
-            other.d < candidate.d + 0.012);
-          if (ambiguous) continue;
-          const old = updated[candidate.index] as Record<string, unknown>;
-          updated[candidate.index] = { ...old, x: candidate.pixel.x, y: candidate.pixel.y };
-          claimedItems.add(candidate.index);
-          claimedPixels.add(candidate.pixelIndex);
+        // Incomplete/over-detected pixel masks cannot safely reposition a layer.
+        if (!entries.length || entries.length !== pixels.length || entries.length > 12) continue;
+        // Exact global assignment for the small teams in coaching diagrams.
+        // Its only job is to attach identities to fixed physical pixel centers.
+        const memo = new Map<string, { cost: number; indices: number[] }>();
+        const assign = (i: number, used: number): { cost: number; indices: number[] } => {
+          if (i === entries.length) return { cost: 0, indices: [] };
+          const key = `${i}:${used}`;
+          const cached = memo.get(key);
+          if (cached) return cached;
+          let best = { cost: Infinity, indices: [] as number[] };
+          for (let j = 0; j < pixels.length; j++) {
+            if (used & (1 << j)) continue;
+            const p = pixels[j];
+            const dx = Number(entries[i].item.x) - p.x;
+            const dy = Number(entries[i].item.y) - p.y;
+            const remainder = assign(i + 1, used | (1 << j));
+            const cost = dx * dx + dy * dy + remainder.cost;
+            if (cost < best.cost) best = { cost, indices: [j, ...remainder.indices] };
+          }
+          memo.set(key, best);
+          return best;
+        };
+        const match = assign(0, 0);
+        for (let i = 0; i < entries.length; i++) {
+          const source = entries[i];
+          const center = pixels[match.indices[i]];
+          updated[source.index] = { ...source.item, x: center.x, y: center.y };
         }
       }
       return updated;
