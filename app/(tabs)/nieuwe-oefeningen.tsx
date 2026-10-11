@@ -117,7 +117,16 @@ export default function NieuweOefeningenScreen() {
         setImportLayers(null);
             setImportLayers(null);
             // A new photo must not reuse objects recognized from a previous photo.
-            setBoardLayout(createEmptyBoardLayout());
+            setBoardLayout({
+                ...createEmptyBoardLayout(),
+                backgroundImageUrl: selected.uri,
+                backgroundOpacity: 0.65,
+                backgroundCalibration: {
+                    bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+                    rotation: 0,
+                    flipHorizontal: false,
+                },
+            });
             setBoardVersion((version) => version + 1);
         } catch (error) {
             setImportError(error instanceof Error ? error.message : "Afbeelding selecteren mislukt.");

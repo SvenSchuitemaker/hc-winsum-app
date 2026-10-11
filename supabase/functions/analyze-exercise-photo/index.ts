@@ -244,6 +244,41 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
 
 
 /**
+ * Interpret a line as a relation between two already recognized jerseys.
+ * Positions are never inferred or changed by this call; actor IDs refer only
+ * to the supplied inventory, so wrong or uncertain IDs simply fall back to
+ * the independently traced original stroke.
+ */
+async function analyzeActorConnections(
+  key: string, model: string, mimeType: string, base64: string,
+  actors: Array<{ id: number; x: number; y: number; color: string; label: string }>,
+  lines: Array<{ id: number; x: number; y: number; x2: number; y2: number; type: string }>,
+): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string }>> {
+  if (!actors.length || !lines.length) return [];
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0, response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content:
+            "Inspect the actual black arrow strokes in the hockey image. For each supplied line identify the source jersey (tail) and destination jersey (arrowhead), by their supplied actor IDs. The jersey positions are already measured and must NEVER be changed. Return JSON {connections:[{lineId,fromActorId,toActorId,type}]}; type is passLine or runLine. Return a connection ONLY if BOTH arrow endpoints clearly attach to two distinct supplied jerseys, in the correct direction. Do not invent players, lines, routes or connections, do not connect a line to a cone/field marking, and do not infer tactics. If a line ends in free space or is ambiguous omit it; that line will retain its original measured coordinates. Do not create any extra lines." },
+          { role: "user", content: [
+            { type: "text", text: `Actors in full-image normalized coordinates: ${JSON.stringify(actors)}. Traced arrows: ${JSON.stringify(lines)}. For each confidently connected arrow, report ONLY its lineId and source/destination actor IDs.` },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+          ] },
+        ],
+      }),
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.connections) ? parsed.connections : [];
+  } catch { return []; }
+}
+
+/**
  * Verify ONLY the endpoints of already traced arrows in a second vision pass.
  * A disagreement never moves any physical object and never creates a line.
  */
@@ -1222,6 +1257,58 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           String(item.label ?? "").toUpperCase() !== "T") return { ...item, shirtColor: "black" };
       return item;
     });
+    // Resolve only the pass-/run-line layer from actor RELATIONS. This runs
+    // after every shirt has its final canvas coordinates. Physical layers are
+    // immutable and do not depend on the connection results.
+    const actorItems = uniqueItems.filter((item) => item.type === "player" ||
+      (item.type === "trainer"));
+    const photoActors = actorItems.map((item, id) => {
+      // Invert the board calibration to identify the corresponding shirt in
+      // the photo; the actual line endpoints always come from item.x/item.y.
+      const matches = (recoveredPhysical as Array<Record<string, unknown>>)
+        .filter((source) => source.type === "player" || source.type === "trainer")
+        .map((source) => ({
+          source,
+          distance: Math.hypot(
+            calibratedPoint(Number(source.x), Number(source.y), calibration).x - Number(item.x),
+            calibratedPoint(Number(source.x), Number(source.y), calibration).y - Number(item.y),
+          ),
+        })).sort((a,b) => a.distance - b.distance);
+      const best = matches[0];
+      return { id, x: Number(best?.source.x ?? item.x), y: Number(best?.source.y ?? item.y),
+        color: String(item.shirtColor ?? ""), label: String(item.label ?? "") };
+    });
+    const canvasArrows = uniqueItems.filter((item) => lineTypes.has(String(item.type)));
+    const rawPhotoArrows = sourceArrows as Array<Record<string, unknown>>;
+    const arrowRequests = canvasArrows.map((item, id) => {
+      const source = rawPhotoArrows[id] ?? item;
+      return { id, x: Number(source.x), y: Number(source.y),
+        x2: Number(source.x2), y2: Number(source.y2), type: String(item.type) };
+    });
+    const connections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
+      photoActors, arrowRequests);
+    let connectedLineCount = 0;
+    const usedConnectionLines = new Set<number>();
+    for (const raw of connections) {
+      if (!raw || !Number.isInteger(raw.lineId) ||
+          !Number.isInteger(raw.fromActorId) || !Number.isInteger(raw.toActorId) ||
+          usedConnectionLines.has(raw.lineId) || raw.fromActorId === raw.toActorId) continue;
+      const item = canvasArrows[raw.lineId];
+      const from = actorItems[raw.fromActorId], to = actorItems[raw.toActorId];
+      if (!item || !from || !to || !lineTypes.has(String(item.type))) continue;
+      if (raw.type !== "passLine" && raw.type !== "runLine") continue;
+      const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
+      if (Math.hypot(dx, dy) < 0.025) continue;
+      // The line direction from vision must roughly agree. Prevent accidental
+      // crossing over half the pitch due to swapped or invented actor IDs.
+      const originalDX = Number(item.x2) - Number(item.x);
+      const originalDY = Number(item.y2) - Number(item.y);
+      if (originalDX * dx + originalDY * dy <= 0) continue;
+      item.x = from.x; item.y = from.y; item.x2 = to.x; item.y2 = to.y;
+      item.type = raw.type;
+      usedConnectionLines.add(raw.lineId);
+      connectedLineCount++;
+    }
     // Geometry and counts are independent. Each accepted inventory object
     // produces exactly one canvas item, including overlapping shirts.
     const countTypes = (values: Array<Record<string, unknown>>) => {
@@ -1235,6 +1322,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (canvasArrows.length && connectedLineCount < canvasArrows.length)
+      warnings.push(`Speler-naar-speler verbindingen: ${connectedLineCount}/${canvasArrows.length} bevestigd; overige pijlen gebruiken de foto-coördinaten.`);
     if (focusedUnique.length && genericNormalized.length && focusedUnique.length !== genericNormalized.length)
       warnings.push("De twee AI-analyses tellen verschillende aantallen pijlen. Alleen de afzonderlijk getraceerde pijlen zijn gebruikt; controleer de foto.");
     if (sourceArrows.length && verifiedEndpoints < sourceArrows.length * 2)

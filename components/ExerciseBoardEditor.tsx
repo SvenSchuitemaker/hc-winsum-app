@@ -58,7 +58,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
         const [backgroundImageUrl, setBackgroundImageUrl] = useState(initialLayoutRef.current.backgroundImageUrl);
         const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
         const [backgroundCalibration, setBackgroundCalibration] = useState(initialLayoutRef.current.backgroundCalibration);
-        const [showBackground, setShowBackground] = useState(false);
+        const [showBackground, setShowBackground] = useState(!!initialLayoutRef.current.backgroundImageUrl);
         const [selectedTool, setSelectedTool] = useState<ToolType>("select");
         const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
         const [boardSize, setBoardSize] = useState({ width: 1, height: 1 });
@@ -108,6 +108,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             setFieldOrientation(next.fieldOrientation === "top" ? "top" : "right");
             setBackgroundOpacity(next.backgroundOpacity ?? 0.65);
             setBackgroundCalibration(next.backgroundCalibration);
+            setShowBackground(!!next.backgroundImageUrl);
             hydratedFromPropsRef.current = true;
         }, [value]);
 
@@ -398,6 +399,13 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
                             <Pressable onPress={() => setShowBackground((current) => !current)} style={styles.toolButton}>
                                 <Text style={styles.toolText}>{showBackground ? "Klaar met overtrekken" : "Toon foto om bij te stellen"}</Text>
+                            </Pressable>
+                            <Pressable onPress={() => setBackgroundCalibration((current) => ({
+                                bounds: current?.bounds ?? { left: 0, top: 0, right: 1, bottom: 1 },
+                                flipHorizontal: current?.flipHorizontal ?? false,
+                                rotation: (((current?.rotation ?? 0) + 90) % 360),
+                            }))} style={styles.toolButton}>
+                                <Text style={styles.toolText}>Foto 90° draaien</Text>
                             </Pressable>
                             <Pressable onPress={() => setBackgroundOpacity((current) => Math.max(0.2, Math.round((current - 0.1) * 10) / 10))} style={styles.toolButton}>
                                 <Text style={styles.toolText}>−</Text>
