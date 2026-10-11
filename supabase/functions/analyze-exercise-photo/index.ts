@@ -942,37 +942,13 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // detection pass. A valid focused line must never suppress ANOTHER clearly
     // separate line visible in the general result. Never infer missing arrows
     // from a known team formation or from player positions.
-    const arrowMidpoint = (a: Record<string, unknown>) => ({
-      x: (Number(a.x) + Number(a.x2)) / 2,
-      y: (Number(a.y) + Number(a.y2)) / 2,
-    });
-    const arrowLength = (a: Record<string, unknown>) =>
-      Math.hypot(Number(a.x2) - Number(a.x), Number(a.y2) - Number(a.y));
-    const isSameStroke = (a: Record<string, unknown>, b: Record<string, unknown>) => {
-      const am = arrowMidpoint(a), bm = arrowMidpoint(b);
-      const aligned = Math.hypot(am.x - bm.x, am.y - bm.y) < 0.055;
-      const ax = Number(a.x2) - Number(a.x), ay = Number(a.y2) - Number(a.y);
-      const bx = Number(b.x2) - Number(b.x), by = Number(b.y2) - Number(b.y);
-      const cosine = (ax * bx + ay * by) / Math.max(0.00001, arrowLength(a) * arrowLength(b));
-      return aligned && cosine > 0.8;
-    };
-    const mergedArrows = [...focusedNormalized];
-    let independentArrowsAdded = 0;
-    for (const candidate of genericNormalized) {
-      if (mergedArrows.some(existing => isSameStroke(existing, candidate))) continue;
-      // The general analysis is less reliable: only retain a distinct stroke
-      // when its arrow is directional and it is not nearly on top of a focused
-      // arrow, otherwise require manual correction.
-      if (candidate.arrowHead === false || arrowLength(candidate) < 0.045) continue;
-      const midpoint = arrowMidpoint(candidate);
-      if (mergedArrows.some(existing => {
-        const p = arrowMidpoint(existing);
-        return Math.hypot(midpoint.x - p.x, midpoint.y - p.y) < 0.11;
-      })) continue;
-      mergedArrows.push(candidate);
-      independentArrowsAdded++;
-    }
-    const rawArrows = mergedArrows.length ? mergedArrows : genericNormalized;
+    // Do not union two independent vision interpretations. They can describe
+    // the SAME ink stroke using substantially different endpoints, resulting
+    // in double counted or entirely fabricated arrows. Trust the dedicated
+    // stroke-tracing pass when it sees any drawable lines; the general pass
+    // is a fallback ONLY when the dedicated pass has no valid strokes.
+    // Neither source is allowed to infer extra arrows from player formation.
+    const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
     let endpointChecks: unknown[] = [];
@@ -1234,7 +1210,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
-    if (independentArrowsAdded > 0) warnings.push(`${independentArrowsAdded} extra lijn(en) uit aparte algemene waarneming toegevoegd; controleer op foto-overlay.`);
+    if (focusedNormalized.length && genericNormalized.length && focusedNormalized.length !== genericNormalized.length)
+      warnings.push("De twee AI-analyses tellen verschillende aantallen pijlen. Alleen de afzonderlijk getraceerde pijlen zijn gebruikt; controleer de foto.");
     if (sourceArrows.length && verifiedEndpoints < sourceArrows.length)
       warnings.push(`Pijlpuntcontrole bevestigd: ${verifiedEndpoints}/${sourceArrows.length}. Niet-bevestigde lijnen behouden hun eerdere coördinaten.`);
     if (arrowItems.length && focusedNormalized.length !== arrowItems.length)
