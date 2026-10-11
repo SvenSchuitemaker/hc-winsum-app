@@ -253,6 +253,7 @@ async function analyzeActorConnections(
   key: string, model: string, mimeType: string, base64: string,
   actors: Array<{ id: number; x: number; y: number; color: string; label: string }>,
   lines: Array<{ id: number; x: number; y: number; x2: number; y2: number; type: string }>,
+  mode: "trace" | "verify" = "trace",
 ): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string; tail: { x: number; y: number }; tip: { x: number; y: number } }>> {
   if (!actors.length || !lines.length) return [];
   try {
@@ -262,7 +263,8 @@ async function analyzeActorConnections(
       body: JSON.stringify({
         model, temperature: 0, response_format: { type: "json_object" },
         messages: [
-          { role: "system", content:
+          { role: "system", content: mode === "verify" ?
+            "Independently audit the black arrowheads in this field hockey drawing. Ignore tactics and shirt numbers as routing rules. Identify the genuine physical tail and triangular tip of EACH arrow in source-image normalized coordinates. Black solid arrows connect two jerseys only if both endpoints visually touch or clearly point to them. Do not assume a coach/trainer participates merely because its shirt is near a line. Carefully distinguish the line from the coach to the nearest player from the line between a player and a blue support shirt. For each supplied lineId output the two actor IDs only if the actual stroke can be followed from its tail to its arrowhead. Never invent or connect distant unrelated actors. Return JSON {connections:[{lineId,fromActorId,toActorId,type,tail:{x,y},tip:{x,y}}]} with type passLine or runLine." :
             "You are visually TRACING existing black arrows in a field hockey diagram, NOT inferring tactics. Work in this exact sequence for EACH visually distinct arrow: (1) find the physical black stroke; (2) follow the same connected stroke to its triangular pointed arrowhead; (3) locate the opposite non-pointed tail; (4) write down BOTH pixel positions as normalized FULL-IMAGE coordinates [0,1]; (5) only then identify the shirt at or immediately adjacent to the tail (fromActorId) and the shirt at or immediately adjacent to the tip (toActorId). Never infer sender/receiver from shirt colors, labels, or logical gameplay. Do not confuse field markings, the trainer, cones, or unrelated nearby shirts with arrow endpoints. Numbers on shirts are NOT actor IDs; use supplied IDs. Lines may stop at a shirt's border rather than its center. A stroke going into open space has no receiving actor, so OMIT that relation. For each arrow use its closest supplied rough lineId; approximate line coordinates are noisy hints and must not override visible stroke direction. Output ONLY JSON {connections:[{lineId,fromActorId,toActorId,type,tail:{x,y},tip:{x,y}}]} with type passLine or runLine. Include a relation only if each endpoint and both actor identities are visually supported. Do not invent routes or hardcode a sequence." },
           { role: "user", content: [
             { type: "text", text: `Actors: ${JSON.stringify(actors)}. Rough arrow candidates (not confirmed endpoints): ${JSON.stringify(lines)}. Trace dark arrow pixels first, return measured tail and tip coordinates and their adjacent actor IDs. Use the correct lineId. Do not guess based on tactics.` },
@@ -1300,7 +1302,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // Only agreement may move a line to shirt centres. This protects a good
     // connection against an unrelated guessed trainer/player pairing.
     const secondConnections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
-      photoActors, arrowRequests);
+      photoActors, arrowRequests, "verify");
     const secondByLine = new Map<number, (typeof secondConnections)[number]>();
     for (const proposed of secondConnections) {
       const id = Number(proposed.lineId);
