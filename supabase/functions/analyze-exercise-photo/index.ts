@@ -226,7 +226,7 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify the type independently for EACH actual arrow: runLine for a player movement/running route (often dashed, zigzag, or distinctly styled as movement), passLine for a ball pass (often solid), and guideLine ONLY when the symbol does not reveal whether it represents running or passing. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify the type independently for EACH actual arrow: runLine for a player movement/running route (often dashed, zigzag, or distinctly styled as movement), passLine for a ball pass (often solid), and guideLine ONLY when the symbol does not reveal whether it represents running or passing. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
         { role: "user", content: [
           { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -865,8 +865,15 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // infer missing team members or tactically rearrange anything.
     const sourceVisualItems: unknown[] = inventoryItems?.length
       ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
-    const physicalSource = sourceVisualItems.filter((item) =>
-      !!item && typeof item === "object" && !lineTypes.has(String((item as Record<string, unknown>).type)));
+    // "Steunspeler" is a caption beside a blue shirt, NOT a separate board
+    // object. Shirt numbers remain on the shirt. Keep unrelated drill text.
+    const physicalSource = sourceVisualItems.filter((item) => {
+      if (!item || typeof item !== "object") return false;
+      const entry = item as Record<string, unknown>;
+      if (lineTypes.has(String(entry.type))) return false;
+      return !(entry.type === "text" &&
+        String(entry.text ?? "").trim().toLowerCase().replace(/\\s+/g, " ") === "steunspeler");
+    });
     // The vision API occasionally returns percentage coordinates (0..100)
     // although normalized 0..1 was requested. Without this conversion the
     // shared canvas calibration clamps BOTH endpoints to the same edge, so
@@ -893,6 +900,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       .filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
       .map(normalizeArrowCoordinates).filter(
         (item): item is Record<string, unknown> => item !== null);
+    // Focused arrow tracing takes priority; never merge unrelated candidate
+    // lines from the general drill description into the same pass layer.
     const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
