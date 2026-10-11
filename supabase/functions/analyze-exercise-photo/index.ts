@@ -1327,34 +1327,49 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       ["black", "grey", "orange"].includes(actor.color.toLowerCase()) &&
       actorItems[actor.id]?.type !== "trainer" &&
       actor.label.trim().toUpperCase() !== "T");
-    const jerseyReadings = await verifyJerseyNumbers(
-      key!, visionModel, mimeType, base64,
-      numberedActors.map(({ id, x, y, color }) => ({ id, x, y, color })),
-    );
-    const acceptedDigits = new Map<number, string>();
-    const grouped = new Map<string, Array<{ id: number; number: string }>>();
-    const seenIds = new Set<number>();
-    for (const reading of jerseyReadings) {
-      const id = Number(reading?.id);
-      const digit = String(reading?.number ?? "").trim();
-      if (!Number.isInteger(id) || !/^[0-9]$/.test(digit) || seenIds.has(id)) continue;
-      const actor = numberedActors.find((entry) => entry.id === id);
-      if (!actor) continue;
-      seenIds.add(id);
-      const color = actor.color.toLowerCase() === "grey" ? "black" : actor.color.toLowerCase();
-      grouped.set(color, [...(grouped.get(color) ?? []), { id, number: digit }]);
-    }
-    for (const readings of grouped.values()) {
-      const counts = new Map<string, number>();
-      for (const reading of readings) counts.set(reading.number, (counts.get(reading.number) ?? 0) + 1);
-      // Never overwrite labels with conflicting or duplicate OCR output.
+    // One AI reading can confidently invent a number, especially on small
+    // phone-sized uploads. Require two independent matching readings for a
+    // relabel; any disagreement keeps the earlier label and never moves a shirt.
+    const [firstJerseyReadings, secondJerseyReadings] = await Promise.all([
+      verifyJerseyNumbers(key!, visionModel, mimeType, base64,
+        numberedActors.map(({ id, x, y, color }) => ({ id, x, y, color }))),
+      verifyJerseyNumbers(key!, visionModel, mimeType, base64,
+        numberedActors.map(({ id, x, y, color }) => ({ id, x, y, color }))),
+    ]);
+    const toUniqueDigitMap = (readings: Array<{ id: number; number: string }>) => {
+      const perActor = new Map<number, string>();
+      const duplicatedIds = new Set<number>();
       for (const reading of readings) {
-        if (counts.get(reading.number) === 1) acceptedDigits.set(reading.id, reading.number);
+        const id = Number(reading?.id);
+        const digit = String(reading?.number ?? "").trim();
+        if (!Number.isInteger(id) || !/^[0-9]$/.test(digit) ||
+            !numberedActors.some((actor) => actor.id === id)) continue;
+        if (perActor.has(id)) duplicatedIds.add(id);
+        else perActor.set(id, digit);
       }
+      for (const id of duplicatedIds) perActor.delete(id);
+      return perActor;
+    };
+    const firstDigits = toUniqueDigitMap(firstJerseyReadings);
+    const secondDigits = toUniqueDigitMap(secondJerseyReadings);
+    const reliableDigits = new Map<number, string>();
+    const teamDigits = new Map<string, Map<string, number>>();
+    for (const actor of numberedActors) {
+      const first = firstDigits.get(actor.id), second = secondDigits.get(actor.id);
+      if (!first || first !== second) continue;
+      reliableDigits.set(actor.id, first);
+      const team = actor.color.toLowerCase() === "grey" ? "black" : actor.color.toLowerCase();
+      if (!teamDigits.has(team)) teamDigits.set(team, new Map());
+      const counts = teamDigits.get(team)!;
+      counts.set(first, (counts.get(first) ?? 0) + 1);
     }
-    for (const [id, digit] of acceptedDigits) {
-      actorItems[id].label = digit;
-      photoActors[id].label = digit;
+    // No duplicates on one team, no guessing missing labels, no reordering.
+    for (const actor of numberedActors) {
+      const digit = reliableDigits.get(actor.id);
+      const team = actor.color.toLowerCase() === "grey" ? "black" : actor.color.toLowerCase();
+      if (!digit || teamDigits.get(team)?.get(digit) !== 1) continue;
+      actorItems[actor.id].label = digit;
+      photoActors[actor.id].label = digit;
     }
     const canvasArrows = uniqueItems.filter((item) => lineTypes.has(String(item.type)));
     const rawPhotoArrows = sourceArrows as Array<Record<string, unknown>>;
