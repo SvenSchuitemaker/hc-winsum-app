@@ -67,7 +67,12 @@ export async function detectRedCones(photo: SelectedExercisePhoto): Promise<Pixe
         // Tall standing cones only: exclude large red player circles, specks,
         // horizontal field decorations and tiny compression artifacts.
         if (pixels < 35 || pixels > 1600 || bw < 5 || bh < 10 ||
-            ratio < 0.75 || ratio > 3.5 || fill < 0.12 || fill > 0.95 ||
+            // Shirt silhouettes are broad and roughly square; a traffic cone is
+            // taller than it is wide. Relaxing this to 0.75 mistakenly counted
+            // orange jerseys as cones (4 additional false positives in the
+            // reference image). Keep this geometric distinction independent
+            // of color, image dimensions and any particular formation.
+            ratio < 1.12 || ratio > 3.5 || fill < 0.12 || fill > 0.95 ||
             bw > width * 0.065 || bh > height * 0.095) continue;
         result.push({ x: sx / pixels / width, y: sy / pixels / height });
     }
@@ -137,7 +142,9 @@ export async function detectPlayerCenters(photo: SelectedExercisePhoto): Promise
             const ratio = bw / bh;
             const fill = pixels / (bw * bh);
             // Shirt silhouettes are compact: avoid horizontal arrows and long text.
-            if (pixels < 60 || pixels > 2700 || bw < 10 || bh < 11 ||
+            // Small digits and jersey outlines can have player colors, but are not
+            // independent shirt silhouettes. Require a substantial component.
+            if (pixels < 180 || pixels > 2700 || bw < 10 || bh < 11 ||
                 ratio < 0.55 || ratio > 1.65 || fill < 0.32 ||
                 bw > width * 0.075 || bh > height * 0.09) continue;
             result.push({ x: sx / pixels / width, y: sy / pixels / height, shirtColor: color });
