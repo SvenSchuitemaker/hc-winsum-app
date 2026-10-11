@@ -226,7 +226,7 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. type=guideLine, strokeColor=#111111, dashed=false, arrowHead=true, lineStyle=straight unless the visible arrow is actually curved. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify the type independently for EACH actual arrow: runLine for a player movement/running route (often dashed, zigzag, or distinctly styled as movement), passLine for a ball pass (often solid), and guideLine ONLY when the symbol does not reveal whether it represents running or passing. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
         { role: "user", content: [
           { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -871,14 +871,16 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       : Array.isArray(parsed.items)
         ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
         : [];
-    // Generic guideLine detections of clearly directional diagram arrows must
-    // render as actual pass arrows, not faint dotted field guides.
-    // Preserve their original endpoints; do not snap them to player centers.
+    // Keep pass routes, running routes and genuinely ambiguous guides separate.
+    // Do not snap endpoints to players or change the route semantics.
     const sourceArrows = rawArrows.map((value) => {
       const arrow = value as Record<string, unknown>;
-      if (arrow?.type !== "guideLine") return value;
-      return { ...arrow, type: "passLine", strokeColor: "#111111",
-        dashed: false, arrowHead: true, lineStyle: "straight" };
+      if (!arrow || !lineTypes.has(String(arrow.type))) return value;
+      // A guideLine is genuinely ambiguous; render it, but never automatically
+      // mislabel an uncertain movement as a pass or drop a classified runLine.
+      return { ...arrow, strokeColor: "#111111",
+        dashed: arrow.dashed === true, arrowHead: true,
+        lineStyle: typeof arrow.lineStyle === "string" ? arrow.lineStyle : "straight" };
     });
 
     // Image-pixel centers can correct approximate AI geometry, but must NEVER
