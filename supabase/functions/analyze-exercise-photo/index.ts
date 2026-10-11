@@ -263,7 +263,7 @@ async function analyzeActorConnections(
         model, temperature: 0, response_format: { type: "json_object" },
         messages: [
           { role: "system", content:
-            "Inspect the actual black arrow strokes in the hockey image. For each supplied line identify the source jersey (tail) and destination jersey (arrowhead), by their supplied actor IDs. The jersey positions are already measured and must NEVER be changed. Return JSON {connections:[{lineId,fromActorId,toActorId,type}]}; type is passLine or runLine. Return a connection ONLY if BOTH arrow endpoints clearly attach to two distinct supplied jerseys, in the correct direction. Do not invent players, lines, routes or connections, do not connect a line to a cone/field marking, and do not infer tactics. If a line ends in free space or is ambiguous omit it; that line will retain its original measured coordinates. Do not create any extra lines." },
+            "Inspect the actual black arrow strokes in the hockey image. For each supplied line identify the source jersey (tail) and destination jersey (arrowhead), by their supplied actor IDs. The jersey positions are already measured and must NEVER be changed. Return JSON {connections:[{lineId,fromActorId,toActorId,type}]}; type is passLine or runLine. Identify which player SENDS the ball and which player RECEIVES it for each visible arrow. A drawn stroke commonly stops at the edge of a shirt or starts slightly outside a shirt: these are valid connections when the source/destination is unambiguous. Read the black triangular arrowhead to establish direction. Only omit a relation when there really is no identifiable actor at one end (for example a line going into open space). Do not invent players, lines, routes or connections, do not connect a line to a cone/field marking, and do not infer tactics. If a line ends in free space or is ambiguous omit it; that line will retain its original measured coordinates. Do not create any extra lines. Return numeric IDs (not names or jersey numbers). For each line in the supplied list, decide independently; use its rough location to match the visible arrow, not its unreliable endpoints." },
           { role: "user", content: [
             { type: "text", text: `Actors in full-image normalized coordinates: ${JSON.stringify(actors)}. Traced arrows: ${JSON.stringify(lines)}. For each confidently connected arrow, report ONLY its lineId and source/destination actor IDs.` },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -1262,20 +1262,25 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // immutable and do not depend on the connection results.
     const actorItems = uniqueItems.filter((item) => item.type === "player" ||
       (item.type === "trainer"));
+    // Invert the EXACT overlay calibration. Do not nearest-match shirts to
+    // another inventory entry: shirts can overlap and duplicates exist.
+    const boardToPhoto = (x: number, y: number) => {
+      let u = calibration.flipHorizontal ? 1 - x : x;
+      let v = y;
+      let p: { x: number; y: number };
+      switch (calibration.rotation) {
+        case 90: p = { x: v, y: 1 - u }; break;
+        case 180: p = { x: 1 - u, y: 1 - v }; break;
+        case 270: p = { x: 1 - v, y: u }; break;
+        default: p = { x: u, y: v };
+      }
+      const b = calibration.bounds;
+      return { x: b.left + p.x * (b.right - b.left),
+        y: b.top + p.y * (b.bottom - b.top) };
+    };
     const photoActors = actorItems.map((item, id) => {
-      // Invert the board calibration to identify the corresponding shirt in
-      // the photo; the actual line endpoints always come from item.x/item.y.
-      const matches = (recoveredPhysical as Array<Record<string, unknown>>)
-        .filter((source) => source.type === "player" || source.type === "trainer")
-        .map((source) => ({
-          source,
-          distance: Math.hypot(
-            calibratedPoint(Number(source.x), Number(source.y), calibration).x - Number(item.x),
-            calibratedPoint(Number(source.x), Number(source.y), calibration).y - Number(item.y),
-          ),
-        })).sort((a,b) => a.distance - b.distance);
-      const best = matches[0];
-      return { id, x: Number(best?.source.x ?? item.x), y: Number(best?.source.y ?? item.y),
+      const point = boardToPhoto(Number(item.x), Number(item.y));
+      return { id, x: point.x, y: point.y,
         color: String(item.shirtColor ?? ""), label: String(item.label ?? "") };
     });
     const canvasArrows = uniqueItems.filter((item) => lineTypes.has(String(item.type)));
@@ -1290,23 +1295,25 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     let connectedLineCount = 0;
     const usedConnectionLines = new Set<number>();
     for (const raw of connections) {
-      if (!raw || !Number.isInteger(raw.lineId) ||
-          !Number.isInteger(raw.fromActorId) || !Number.isInteger(raw.toActorId) ||
-          usedConnectionLines.has(raw.lineId) || raw.fromActorId === raw.toActorId) continue;
-      const item = canvasArrows[raw.lineId];
-      const from = actorItems[raw.fromActorId], to = actorItems[raw.toActorId];
+      if (!raw) continue;
+      const lineId = Number(raw.lineId);
+      const fromId = Number(raw.fromActorId);
+      const toId = Number(raw.toActorId);
+      if (![lineId, fromId, toId].every(Number.isInteger) ||
+          usedConnectionLines.has(lineId) || fromId === toId) continue;
+      const item = canvasArrows[lineId];
+      const from = actorItems[fromId], to = actorItems[toId];
       if (!item || !from || !to || !lineTypes.has(String(item.type))) continue;
       if (raw.type !== "passLine" && raw.type !== "runLine") continue;
       const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
       if (Math.hypot(dx, dy) < 0.025) continue;
-      // The line direction from vision must roughly agree. Prevent accidental
-      // crossing over half the pitch due to swapped or invented actor IDs.
-      const originalDX = Number(item.x2) - Number(item.x);
-      const originalDY = Number(item.y2) - Number(item.y);
-      if (originalDX * dx + originalDY * dy <= 0) continue;
+      // The source-end geometry is frequently wrong (the reason for this
+      // feature). Do NOT reject a vision-identified relation because the
+      // earlier approximate arrow points in another direction. The separately
+      // checked actor IDs and visible arrowhead determine its orientation.
       item.x = from.x; item.y = from.y; item.x2 = to.x; item.y2 = to.y;
       item.type = raw.type;
-      usedConnectionLines.add(raw.lineId);
+      usedConnectionLines.add(lineId);
       connectedLineCount++;
     }
     // Geometry and counts are independent. Each accepted inventory object
