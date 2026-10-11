@@ -878,8 +878,13 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       if (!arrow || !lineTypes.has(String(arrow.type))) return value;
       // A guideLine is genuinely ambiguous; render it, but never automatically
       // mislabel an uncertain movement as a pass or drop a classified runLine.
-      return { ...arrow, strokeColor: "#111111",
-        dashed: arrow.dashed === true, arrowHead: true,
+      // Solid directional arrows from the photo are pass lines. Keep dashed
+      // movement arrows and explicitly classified run lines separate.
+      const isSolidArrow = arrow.type === "guideLine" &&
+        arrow.dashed !== true && arrow.arrowHead !== false;
+      return { ...arrow, type: isSolidArrow ? "passLine" : arrow.type,
+        strokeColor: "#111111", dashed: arrow.dashed === true,
+        arrowHead: true,
         lineStyle: typeof arrow.lineStyle === "string" ? arrow.lineStyle : "straight" };
     });
 
