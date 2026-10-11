@@ -1295,14 +1295,19 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       return { id, x: Number(source.x), y: Number(source.y),
         x2: Number(source.x2), y2: Number(source.y2), type: String(item.type) };
     });
+    // Passes connect players. Trainers remain on the canvas, but are not
+    // eligible pass endpoints. Preserve original actor IDs for exact mapping.
+    const eligiblePassActors = photoActors.filter((actor) =>
+      actorItems[actor.id]?.type !== "trainer" &&
+      String(actor.label).trim().toUpperCase() !== "T");
     const firstConnections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
-      photoActors, arrowRequests);
+      eligiblePassActors, arrowRequests);
     // Ask for a separate, object-ID-only reading of the visible arrows.
     // The second opinion is independent of the first model's proposed edges.
     // Only agreement may move a line to shirt centres. This protects a good
     // connection against an unrelated guessed trainer/player pairing.
     const secondConnections = await analyzeActorConnections(key!, visionModel, mimeType, base64,
-      photoActors, arrowRequests, "verify");
+      eligiblePassActors, arrowRequests, "verify");
     const secondByLine = new Map<number, (typeof secondConnections)[number]>();
     for (const proposed of secondConnections) {
       const id = Number(proposed.lineId);
@@ -1348,10 +1353,15 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       if (!Number.isInteger(lineId) || lineId < 0 || lineId >= lineConnections.length ||
           !Number.isInteger(fromId) || !Number.isInteger(toId) ||
           !actorItems[fromId] || !actorItems[toId]) continue;
+      const trainerInPass = canvasArrows[lineId]?.type === "passLine" &&
+        (actorItems[fromId]?.type === "trainer" || actorItems[toId]?.type === "trainer" ||
+          String(actorItems[fromId]?.label ?? "").trim().toUpperCase() === "T" ||
+          String(actorItems[toId]?.label ?? "").trim().toUpperCase() === "T");
       lineConnections[lineId] = {
         line: lineId + 1, from: describeActor(fromId), to: describeActor(toId),
         type: String(canvasArrows[lineId]?.type ?? "guideLine"),
-        status: value.agreed ? "voorgesteld" : "onzeker: analyses verschillen",
+        status: trainerInPass ? "afgewezen: trainer is geen passspeler" :
+          value.agreed ? "voorgesteld" : "onzeker: analyses verschillen",
       };
     }
     let connectedLineCount = 0;
@@ -1367,6 +1377,12 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const item = canvasArrows[lineId];
       const from = actorItems[fromId], to = actorItems[toId];
       if (!item || !from || !to || !lineTypes.has(String(item.type))) continue;
+      if (item.type === "passLine" && (from.type === "trainer" || to.type === "trainer" ||
+          String(from.label ?? "").trim().toUpperCase() === "T" ||
+          String(to.label ?? "").trim().toUpperCase() === "T")) {
+        rejectedActorConnections++;
+        continue;
+      }
       if (!raw.agreed) { rejectedActorConnections++; continue; }
       if (raw.type !== "passLine" && raw.type !== "runLine") continue;
       const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
