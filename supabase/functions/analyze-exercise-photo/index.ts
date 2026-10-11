@@ -226,9 +226,9 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. First independently count visible BLACK arrowheads (not arrows imagined from player positions), then return exactly one stroke per uniquely visible arrowhead. Ensure each item has its own physically visible tip. Never duplicate a tip, invent extra arrows, or drop an arrowhead that is clearly present. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify each actual arrow by visible evidence: runLine ONLY for a movement/running route shown by a dashed, zigzag, or distinct running-style stroke; passLine for a solid arrow visibly indicating a ball pass; guideLine when the drawing does not establish its meaning. Never call a solid pass line a runLine merely because it points to a player. Never invent missing running lines. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Before returning, verify the tail, arrowhead tip, and black stroke connecting them are all visible in the uploaded image. Do not join two separate arrows into one long line. Follow three-part paths as separate strokes only when separate arrowheads actually exist. Reject any line unsupported by dark pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. First make an internal stroke inventory: inspect each physically visible BLACK triangular arrowhead, trace BACKWARD through its continuous black ink to the tail, then count UNIQUE traced strokes. Output exactly one stroke for every unique visible arrowhead. When two proposed arrows share the same visible black segment or same physical arrowhead, they are ONE arrow; do not split at an intersecting line, player, cone or field marking. A crossing is not automatically a turn or a new arrow. Never insert a segment between two shirts merely because a pass seems tactically likely. Check your proposed count against the number of individually identifiable arrowheads before returning. Ensure each item has its own physically visible tip. Never duplicate a tip, invent extra arrows, or drop an arrowhead that is clearly present. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify each actual arrow by visible evidence: runLine ONLY for a movement/running route shown by a dashed, zigzag, or distinct running-style stroke; passLine for a solid arrow visibly indicating a ball pass; guideLine when the drawing does not establish its meaning. Never call a solid pass line a runLine merely because it points to a player. Never invent missing running lines. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Before returning, verify the tail, arrowhead tip, and black stroke connecting them are all visible in the uploaded image. Do not join two separate arrows into one long line. Follow three-part paths as separate strokes only when separate arrowheads actually exist. Reject any line unsupported by dark pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
         { role: "user", content: [
-          { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
+          { type: "text", text: "First count black arrowheads, then trace each connected black stroke backwards to its actual tail. Treat crossings as crossings, not endpoints. Return only arrows whose unique physical arrowhead AND continuous stroke you can see. Do not connect players on tactical grounds. Use full-original-image coordinates and preserve direction." },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
         ] },
       ],
@@ -1027,43 +1027,10 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
                    Number(other.y2) - Number(candidate.y2)) < 0.028);
       if (!duplicateTip) focusedUnique.push(candidate);
     }
-    // Focused tracing occasionally misses the final arrow, even though the
-    // general image pass saw its ink. Recover ONLY an independently seen,
-    // geometrically distinct stroke whose endpoints are next to actual shirts.
-    // Never recover lines by assuming a tactical sequence or expected count.
-    const shirtAnchors = physicalSource.flatMap((item) => {
-      const actor = item as Record<string, unknown>;
-      if (!["player", "attacker", "defender"].includes(String(actor.type)) ||
-          String(actor.label ?? "").trim().toUpperCase() === "T") return [];
-      const x = Number(actor.x), y = Number(actor.y);
-      return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
-    });
-    const nearShirt = (p: { x: number; y: number }) =>
-      shirtAnchors.some((actor) => Math.hypot(actor.x - p.x, actor.y - p.y) <= 0.105);
-    const sameStroke = (a: Record<string, unknown>, b: Record<string, unknown>) => {
-      const tail = { x: Number(a.x), y: Number(a.y) };
-      const tip = { x: Number(a.x2), y: Number(a.y2) };
-      const otherTail = { x: Number(b.x), y: Number(b.y) };
-      const otherTip = { x: Number(b.x2), y: Number(b.y2) };
-      const distance = (p: typeof tail, q: typeof tail) => Math.hypot(p.x - q.x, p.y - q.y);
-      // Compare both ends, not just arrowhead: two different passes may share a receiver.
-      return (distance(tail, otherTail) < 0.075 && distance(tip, otherTip) < 0.075) ||
-        (distance(tail, otherTip) < 0.075 && distance(tip, otherTail) < 0.075);
-    };
-    const rawArrows = [...focusedUnique];
-    if (!rawArrows.length) rawArrows.push(...genericNormalized);
-    else for (const candidate of genericNormalized) {
-      if (rawArrows.some((existing) => sameStroke(existing, candidate))) continue;
-      const tail = { x: Number(candidate.x), y: Number(candidate.y) };
-      const tip = { x: Number(candidate.x2), y: Number(candidate.y2) };
-      // The generic reading must have plausible physical endpoints on TWO
-      // playing jerseys. Ambiguous loose arrows are not silently added.
-      if (!nearShirt(tail) || !nearShirt(tip)) continue;
-      if (rawArrows.some((existing) =>
-        Math.hypot(Number(existing.x2) - tip.x, Number(existing.y2) - tip.y) < 0.04 &&
-        Math.hypot(Number(existing.x) - tail.x, Number(existing.y) - tail.y) < 0.12)) continue;
-      rawArrows.push(candidate);
-    }
+    // A general-purpose recognition pass may re-describe the SAME ink with
+    // different geometry. Do not merge its speculative arrows into the
+    // dedicated trace: this previously turned three drawn arrows into four.
+    const rawArrows = focusedUnique.length ? focusedUnique : genericNormalized;
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
     let endpointChecks: unknown[] = [];
