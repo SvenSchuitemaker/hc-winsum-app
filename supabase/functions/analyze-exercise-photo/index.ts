@@ -253,7 +253,7 @@ async function analyzeActorConnections(
   key: string, model: string, mimeType: string, base64: string,
   actors: Array<{ id: number; x: number; y: number; color: string; label: string }>,
   lines: Array<{ id: number; x: number; y: number; x2: number; y2: number; type: string }>,
-): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string }>> {
+): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string; tail: { x: number; y: number }; tip: { x: number; y: number } }>> {
   if (!actors.length || !lines.length) return [];
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -263,9 +263,9 @@ async function analyzeActorConnections(
         model, temperature: 0, response_format: { type: "json_object" },
         messages: [
           { role: "system", content:
-            "Inspect the actual black arrow strokes in the hockey image. For each supplied line identify the source jersey (tail) and destination jersey (arrowhead), by their supplied actor IDs. The jersey positions are already measured and must NEVER be changed. Return JSON {connections:[{lineId,fromActorId,toActorId,type}]}; type is passLine or runLine. Identify which player SENDS the ball and which player RECEIVES it for each visible arrow. A drawn stroke commonly stops at the edge of a shirt or starts slightly outside a shirt: these are valid connections when the source/destination is unambiguous. Read the black triangular arrowhead to establish direction. Only omit a relation when there really is no identifiable actor at one end (for example a line going into open space). Do not invent players, lines, routes or connections, do not connect a line to a cone/field marking, and do not infer tactics. If a line ends in free space or is ambiguous omit it; that line will retain its original measured coordinates. Do not create any extra lines. Return numeric IDs (not names or jersey numbers). For each line in the supplied list, decide independently; use its rough location to match the visible arrow, not its unreliable endpoints." },
+            "You are visually TRACING existing black arrows in a field hockey diagram, NOT inferring tactics. Work in this exact sequence for EACH visually distinct arrow: (1) find the physical black stroke; (2) follow the same connected stroke to its triangular pointed arrowhead; (3) locate the opposite non-pointed tail; (4) write down BOTH pixel positions as normalized FULL-IMAGE coordinates [0,1]; (5) only then identify the shirt at or immediately adjacent to the tail (fromActorId) and the shirt at or immediately adjacent to the tip (toActorId). Never infer sender/receiver from shirt colors, labels, or logical gameplay. Do not confuse field markings, the trainer, cones, or unrelated nearby shirts with arrow endpoints. Numbers on shirts are NOT actor IDs; use supplied IDs. Lines may stop at a shirt's border rather than its center. A stroke going into open space has no receiving actor, so OMIT that relation. For each arrow use its closest supplied rough lineId; approximate line coordinates are noisy hints and must not override visible stroke direction. Output ONLY JSON {connections:[{lineId,fromActorId,toActorId,type,tail:{x,y},tip:{x,y}}]} with type passLine or runLine. Include a relation only if each endpoint and both actor identities are visually supported. Do not invent routes or hardcode a sequence." },
           { role: "user", content: [
-            { type: "text", text: `Actors in full-image normalized coordinates: ${JSON.stringify(actors)}. Traced arrows: ${JSON.stringify(lines)}. For each confidently connected arrow, report ONLY its lineId and source/destination actor IDs.` },
+            { type: "text", text: `Actors: ${JSON.stringify(actors)}. Rough arrow candidates (not confirmed endpoints): ${JSON.stringify(lines)}. Trace dark arrow pixels first, return measured tail and tip coordinates and their adjacent actor IDs. Use the correct lineId. Do not guess based on tactics.` },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
           ] },
         ],
@@ -1346,41 +1346,42 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       if (raw.type !== "passLine" && raw.type !== "runLine") continue;
       const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
       if (Math.hypot(dx, dy) < 0.025) continue;
-      // The model can identify the wrong shirt even when both IDs exist.
-      // Compare the claimed relation to the visible source stroke BEFORE
-      // snapping to jersey centres, using the calibrated canvas space.
-      const ax = Number(item.x), ay = Number(item.y);
-      const bx = Number(item.x2), by = Number(item.y2);
-      const segmentDX = bx - ax, segmentDY = by - ay;
-      const segmentLen = Math.hypot(segmentDX, segmentDY);
-      const actorLen = Math.hypot(dx, dy);
-      if (segmentLen < 0.02) continue;
-      const similarity = (segmentDX * dx + segmentDY * dy) /
-        (segmentLen * actorLen);
-      const sourceError = Math.hypot(Number(from.x) - ax, Number(from.y) - ay);
-      const destError = Math.hypot(Number(to.x) - bx, Number(to.y) - by);
-      // A line may stop at a jersey edge; substantial jumps to a completely
-      // different player or reversal are not an acceptable connection.
-      if (similarity < 0.5 || sourceError > 0.20 || destError > 0.20) { rejectedActorConnections++; continue; }
-      // Don't select an AI-proposed pair if some other two real actor centres
-      // fit the drawn stroke MUCH better. This specifically blocks a false
-      // long diagonal from one black shirt to the opposite blue supporter.
-      const actorDistance = sourceError + destError;
-      const nearestPairScore = actorItems.reduce((best, a) =>
-        Math.min(best, actorItems.reduce((inner, b) => {
-          if (a === b) return inner;
-          const sdx = Number(b.x) - Number(a.x);
-          const sdy = Number(b.y) - Number(a.y);
-          if (sdx * segmentDX + sdy * segmentDY <= 0) return inner;
-          return Math.min(inner,
-            Math.hypot(Number(a.x) - ax, Number(a.y) - ay) +
-            Math.hypot(Number(b.x) - bx, Number(b.y) - by));
-        }, Infinity)), Infinity);
-      if (actorDistance > nearestPairScore + 0.10) { rejectedActorConnections++; continue; }
-      // The source-end geometry is frequently wrong (the reason for this
-      // feature). Do NOT reject a vision-identified relation because the
-      // earlier approximate arrow points in another direction. The separately
-      // checked actor IDs and visible arrowhead determine its orientation.
+      // Validate against the NEW independent image-space line trace, not
+      // against the OLD candidate arrows (their endpoints are known wrong).
+      // Never snap a visually unsupported relation onto a random jersey.
+      const candidate = raw as typeof raw & {
+        tail?: { x: number; y: number }; tip?: { x: number; y: number };
+      };
+      const tail = candidate.tail, tip = candidate.tip;
+      if (!tail || !tip ||
+          ![tail.x, tail.y, tip.x, tip.y].every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1)) {
+        rejectedActorConnections++;
+        continue;
+      }
+      const fromPhoto = photoActors[fromId], toPhoto = photoActors[toId];
+      const tailError = Math.hypot(tail.x - fromPhoto.x, tail.y - fromPhoto.y);
+      const tipError = Math.hypot(tip.x - toPhoto.x, tip.y - toPhoto.y);
+      const arrowLength = Math.hypot(tip.x - tail.x, tip.y - tail.y);
+      const actorLength = Math.hypot(toPhoto.x - fromPhoto.x, toPhoto.y - fromPhoto.y);
+      const directionDot = ((tip.x - tail.x) * (toPhoto.x - fromPhoto.x) +
+        (tip.y - tail.y) * (toPhoto.y - fromPhoto.y)) /
+        Math.max(0.000001, arrowLength * actorLength);
+      // The source and destination must agree with the measured visible
+      // endpoints. Allow margin for jerseys' physical size, not large jumps.
+      if (arrowLength < 0.025 || tailError > 0.085 || tipError > 0.085 ||
+          directionDot < 0.75) {
+        rejectedActorConnections++;
+        continue;
+      }
+      // Reject a claimed identity when a different actor is obviously nearer
+      // to that line endpoint. Prevents ambiguous overlapping players.
+      const closerOther = (point: { x: number; y: number }, id: number, error: number) =>
+        photoActors.some((actor) => actor.id !== id &&
+          Math.hypot(actor.x - point.x, actor.y - point.y) + 0.025 < error);
+      if (closerOther(tail, fromId, tailError) || closerOther(tip, toId, tipError)) {
+        rejectedActorConnections++;
+        continue;
+      }
       item.x = from.x; item.y = from.y; item.x2 = to.x; item.y2 = to.y;
       item.type = raw.type;
       usedConnectionLines.add(lineId);
