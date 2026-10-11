@@ -867,23 +867,36 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
     const physicalSource = sourceVisualItems.filter((item) =>
       !!item && typeof item === "object" && !lineTypes.has(String((item as Record<string, unknown>).type)));
-    // Reject arrows that have identical/near-identical endpoints. Previous
-    // audits counted these as "placed" even though nothing could be drawn.
-    const usableArrow = (value: unknown): boolean => {
-      if (!value || typeof value !== "object") return false;
-      const a = value as Record<string, unknown>;
-      const x = Number(a.x), y = Number(a.y), x2 = Number(a.x2), y2 = Number(a.y2);
-      return [x, y, x2, y2].every(Number.isFinite) &&
-        Math.hypot(x2 - x, y2 - y) >= 0.035;
+    // The vision API occasionally returns percentage coordinates (0..100)
+    // although normalized 0..1 was requested. Without this conversion the
+    // shared canvas calibration clamps BOTH endpoints to the same edge, so
+    // the UI counts an arrow but can only draw an invisible dot.
+    // Never alter player, cone or other object coordinates here.
+    const normalizeArrowCoordinates = (raw: unknown): Record<string, unknown> | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const item = raw as Record<string, unknown>;
+      const values = [item.x, item.y, item.x2, item.y2].map(Number);
+      if (!values.every(Number.isFinite) || values.some(v => v < 0 || v > 100)) return null;
+      // 0..1 is preferred. Treat values above 1 as percentages only if
+      // the complete coordinate tuple can represent that range.
+      const scale = values.some(v => v > 1) ? 0.01 : 1;
+      const [x, y, x2, y2] = values.map(v => v * scale);
+      if ([x,y,x2,y2].some(v => v < 0 || v > 1)) return null;
+      const start = calibratedPoint(x, y, calibration);
+      const end = calibratedPoint(x2, y2, calibration);
+      if (Math.hypot(start.x - end.x, start.y - end.y) < 0.018) return null;
+      return { ...item, x, y, x2, y2 };
     };
-    const validFocusedArrows = arrowItems.filter(usableArrow);
-    const rawArrows = validFocusedArrows.length ? validFocusedArrows
-      : Array.isArray(parsed.items)
-        ? parsed.items.filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
-        : [];
+    const focusedNormalized = arrowItems.map(normalizeArrowCoordinates).filter(
+      (item): item is Record<string, unknown> => item !== null);
+    const genericNormalized = (Array.isArray(parsed.items) ? parsed.items : [])
+      .filter((item: Record<string, unknown>) => lineTypes.has(String(item?.type)))
+      .map(normalizeArrowCoordinates).filter(
+        (item): item is Record<string, unknown> => item !== null);
+    const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
-    const sourceArrows = rawArrows.filter(usableArrow).map((value) => {
+    const sourceArrows = rawArrows.map((value) => {
       const arrow = value as Record<string, unknown>;
       if (!arrow || !lineTypes.has(String(arrow.type))) return value;
       // A guideLine is genuinely ambiguous; render it, but never automatically
@@ -1092,14 +1105,14 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const inventoryCounts = countTypes(reliablePhysical as Array<Record<string, unknown>>);
     const outputCounts = countTypes(uniqueItems);
     const warnings: string[] = [];
+    if (arrowItems.length && focusedNormalized.length !== arrowItems.length)
+      warnings.push("Sommige herkende pijlen hadden ongeldige, niet-genormaliseerde of samenvallende eindpunten. Alleen werkelijk tekenbare lijnen zijn meegenomen.");
+    if (sourceArrows.length === 0 && (arrowItems.length || genericNormalized.length))
+      warnings.push("Geen betrouwbare pijlcoördinaten overgebleven. Teken deze lijnen handmatig of probeer een duidelijkere foto.");
     if (!inventoryItems?.length) warnings.push("Aparte inventarisatie niet beschikbaar: controleer de aantallen.");
     if (playerAnchors.length && playerAnchors.length !== physicalSource.filter((v) =>
       (v as Record<string, unknown>).type === "player").length)
       warnings.push("Shirt-pixeltelling verschilt van AI-inventaris: geen extra spelers aangemaakt; controleer ontbrekende of dubbel gedetecteerde shirts.");
-    if (arrowItems.length !== validFocusedArrows.length)
-      warnings.push("Eén of meer AI-pijlen hadden samenvallende begin- en eindpunten en zijn niet als zichtbare lijn meegeteld.");
-    if (rawArrows.length !== sourceArrows.length)
-      warnings.push("Ongeldige of te korte passpijlen niet getekend: analyseer opnieuw of teken ze handmatig.");
     if (sourceArrows.length && sourceArrows.every((v) => (v as Record<string, unknown>).type === "guideLine"))
       warnings.push("Pijltypes zijn onzeker: alle lijnen als algemene hulplijn gedetecteerd.");
     if (conePixelsCredible && coneAnchors.length !== physicalSource.filter((obj) => (obj as Record<string, unknown>).type === "cone").length) warnings.push("Aantal AI-pylonnen wijkt af van de gemeten foto: de fotopixels zijn gebruikt.");
