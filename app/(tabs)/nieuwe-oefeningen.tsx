@@ -60,6 +60,7 @@ export default function NieuweOefeningenScreen() {
     const [analyzing, setAnalyzing] = useState(false);
     const [importError, setImportError] = useState("");
     const [importAudit, setImportAudit] = useState<{ inventory: Record<string, number>; placed: Record<string, number>; warnings: string[] } | null>(null);
+    const [importLayers, setImportLayers] = useState<Record<string, { status: "ok" | "warning" | "empty"; detected: number; placed: number; reason: string }> | null>(null);
     const [boardVersion, setBoardVersion] = useState(0);
     const [subtitle, setSubtitle] = useState("");
     const [explanation, setExplanation] = useState("");
@@ -113,6 +114,8 @@ export default function NieuweOefeningenScreen() {
             if (!selected) return;
             setImportPhoto(selected);
             setImportAudit(null);
+        setImportLayers(null);
+            setImportLayers(null);
             // A new photo must not reuse objects recognized from a previous photo.
             setBoardLayout(createEmptyBoardLayout());
             setBoardVersion((version) => version + 1);
@@ -128,6 +131,7 @@ export default function NieuweOefeningenScreen() {
             setImportError("");
             const result = await analyzeExercisePhoto(importPhoto);
             setImportAudit(result.import_audit ?? null);
+            setImportLayers(result.layers ?? null);
             if (result.title) setTitle(result.title);
             if (result.subtitle) setSubtitle(result.subtitle);
             if (result.explanation) setExplanation(result.explanation);
@@ -342,6 +346,29 @@ export default function NieuweOefeningenScreen() {
                         </Pressable>
                     )}
                     {!!importError && <Text style={styles.importError}>{importError}</Text>}
+                    {importMode === "ai" && importLayers && (
+                        <View style={{ marginTop: 12, gap: 8 }}>
+                            <Text style={styles.label}>Controle per AI-laag</Text>
+                            {([
+                                ["cones", "1. Pylonnen"],
+                                ["team1", "2. Team 1"],
+                                ["team2", "3. Team 2"],
+                                ["trainer", "4. Trainer"],
+                                ["passLines", "5. Passlijnen"],
+                                ["runLines", "6. Looplijnen"],
+                                ["supportPlayers", "7. Steunspelers"],
+                            ] as const).map(([key, title]) => {
+                                const layer = importLayers[key];
+                                if (!layer) return null;
+                                return (
+                                    <View key={key} style={{ marginBottom: 4 }}>
+                                        <Text style={styles.helpText}>{title}: {layer.placed}/{layer.detected} geplaatst — {layer.status === "ok" ? "Geplaatst" : layer.status === "empty" ? "Niet herkend" : "Controle nodig"}</Text>
+                                        {!!layer.reason && <Text style={styles.importError}>{layer.reason}</Text>}
+                                    </View>
+                                );
+                            })}
+                        </View>
+                    )}
                     {importMode === "ai" && importAudit && (
                         <View style={{ marginTop: 12, gap: 6 }}>
                             <Text style={styles.helpText}>AI-inventarisatie (controleer met de originele foto):</Text>
