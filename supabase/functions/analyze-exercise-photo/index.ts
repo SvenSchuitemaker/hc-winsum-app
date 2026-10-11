@@ -259,7 +259,7 @@ async function verifyArrowEndpoints(key: string, model: string, mimeType: string
     body: JSON.stringify({
       model, temperature: 0, response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "Independently VERIFY the exact visible tail and arrowhead TIP of each already identified black arrow in a hockey diagram. Return {items:[{id,x,y,x2,y2}]} with original-image normalized coordinates 0..1. ID must be the candidate index. Trace real black ink, not tactical meaning or nearby shirt locations. A tail begins where the actual stroke begins; x2,y2 must be the precise arrowhead TIP. Do not shift endpoints to a nearby player or cone. Skip any candidate that cannot be followed visually. Do not generate additional arrows." },
+        { role: "system", content: "Independently VERIFY the exact visible tail and arrowhead TIP of each already identified black arrow in a hockey diagram. Return {items:[{id,x,y,x2,y2}]} with original-image normalized coordinates 0..1. ID must be the candidate index. Trace real black ink, not tactical meaning or nearby shirt locations. A tail begins where the actual stroke begins; x2,y2 must be the precise arrowhead TIP. Use the FULL UPLOADED IMAGE (not the cropped field) with origin at top-left and x/y values in 0..1. Verify each arrow separately by tracing its continuous DARK stroke from tail to the triangular arrowhead. Ignore green field boundaries, white pitch markings and shirts. Do not move the start or end onto a jersey, player, cone, or field boundary unless the black stroke literally touches it. Return the original candidate id and source-image coordinates. Preserve candidate direction; when you cannot visually confirm BOTH endpoints return no entry for that id. Do not create or connect strokes not present in the photo." },
         { role: "user", content: [
           { type: "text", text: `Re-check these candidate strokes against the image itself: ${JSON.stringify(candidates)}. Return only independently visible precise endpoints.` },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -966,24 +966,40 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     } catch { /* Keep original arrows when verification is unavailable. */ }
     let verifiedEndpoints = 0;
     const candidateArrows = rawArrows.map((item, i) => {
-      const checks = endpointChecks.filter((v) => v && typeof v === "object" &&
+      const matches = endpointChecks.filter((v) => v && typeof v === "object" &&
         Number((v as Record<string, unknown>).id) === i);
-      if (checks.length !== 1) return item;
-      const normalized = normalizeArrowCoordinates(checks[0]);
+      if (matches.length !== 1) return item;
+      const normalized = normalizeArrowCoordinates(matches[0]);
       if (!normalized) return item;
-      const dx = Number(normalized.x) - Number(item.x);
-      const dy = Number(normalized.y) - Number(item.y);
-      const ex = Number(normalized.x2) - Number(item.x2);
-      const ey = Number(normalized.y2) - Number(item.y2);
-      if (Math.hypot(dx, dy) > 0.16 || Math.hypot(ex, ey) > 0.16) return item;
-      const firstDx = Number(item.x2) - Number(item.x);
-      const firstDy = Number(item.y2) - Number(item.y);
-      const nextDx = Number(normalized.x2) - Number(normalized.x);
-      const nextDy = Number(normalized.y2) - Number(normalized.y);
-      if (firstDx * nextDx + firstDy * nextDy <= 0) return item;
-      verifiedEndpoints++;
-      return { ...item, x: normalized.x, y: normalized.y,
-        x2: normalized.x2, y2: normalized.y2 };
+      const oldStart = { x: Number(item.x), y: Number(item.y) };
+      const oldTip = { x: Number(item.x2), y: Number(item.y2) };
+      const newStart = { x: Number(normalized.x), y: Number(normalized.y) };
+      const newTip = { x: Number(normalized.x2), y: Number(normalized.y2) };
+      // Do not accept a line whose two ends have been swapped, or whose
+      // geometry points in a substantially different direction.
+      const ux = oldTip.x - oldStart.x, uy = oldTip.y - oldStart.y;
+      const vx = newTip.x - newStart.x, vy = newTip.y - newStart.y;
+      const cosine = (ux * vx + uy * vy) /
+        Math.max(0.00001, Math.hypot(ux, uy) * Math.hypot(vx, vy));
+      if (cosine < 0.85) return item;
+      // The independent verification can adjust each endpoint separately.
+      // Prior behavior rejected an entire correction when just one endpoint
+      // differed, leaving BOTH points wrong. Large jumps remain forbidden.
+      const startDelta = Math.hypot(newStart.x - oldStart.x, newStart.y - oldStart.y);
+      const tipDelta = Math.hypot(newTip.x - oldTip.x, newTip.y - oldTip.y);
+      const startOk = startDelta <= 0.12;
+      const tipOk = tipDelta <= 0.12;
+      if (!startOk && !tipOk) return item;
+      const next = {
+        ...item,
+        x: startOk ? newStart.x : oldStart.x,
+        y: startOk ? newStart.y : oldStart.y,
+        x2: tipOk ? newTip.x : oldTip.x,
+        y2: tipOk ? newTip.y : oldTip.y,
+      };
+      if (!normalizeArrowCoordinates(next)) return item;
+      verifiedEndpoints += Number(startOk) + Number(tipOk);
+      return next;
     });
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
@@ -1221,8 +1237,8 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const warnings: string[] = [];
     if (focusedUnique.length && genericNormalized.length && focusedUnique.length !== genericNormalized.length)
       warnings.push("De twee AI-analyses tellen verschillende aantallen pijlen. Alleen de afzonderlijk getraceerde pijlen zijn gebruikt; controleer de foto.");
-    if (sourceArrows.length && verifiedEndpoints < sourceArrows.length)
-      warnings.push(`Pijlpuntcontrole bevestigd: ${verifiedEndpoints}/${sourceArrows.length}. Niet-bevestigde lijnen behouden hun eerdere coördinaten.`);
+    if (sourceArrows.length && verifiedEndpoints < sourceArrows.length * 2)
+      warnings.push(`Lijn-eindpunten onafhankelijk gecontroleerd: ${verifiedEndpoints}/${sourceArrows.length * 2}. Niet-bevestigde punten blijven ongewijzigd.`);
     if (arrowItems.length && focusedNormalized.length !== arrowItems.length)
       warnings.push("Sommige herkende pijlen hadden ongeldige, niet-genormaliseerde of samenvallende eindpunten. Alleen werkelijk tekenbare lijnen zijn meegenomen.");
     if (sourceArrows.length === 0 && (arrowItems.length || genericNormalized.length))
