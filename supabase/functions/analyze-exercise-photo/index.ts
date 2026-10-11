@@ -1336,6 +1336,34 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const id = Number(proposal.lineId);
       if (Number.isInteger(id) && !thirdByLine.has(id)) thirdByLine.set(id, proposal);
     }
+    // Resolve disagreements by the *measured* photo-space arrow endpoints,
+    // never by tactical assumptions or the old rough candidate coordinates.
+    // This changes only pass-line snapping, not player or cone placement.
+    const fitsMeasuredArrow = (candidate: (typeof firstConnections)[number] | undefined) => {
+      if (!candidate) return false;
+      const fromId = Number(candidate.fromActorId), toId = Number(candidate.toActorId);
+      if (!Number.isInteger(fromId) || !Number.isInteger(toId) || fromId === toId ||
+          !eligiblePassActors.some((actor) => actor.id === fromId) ||
+          !eligiblePassActors.some((actor) => actor.id === toId)) return false;
+      const from = photoActors[fromId], to = photoActors[toId];
+      const tail = candidate.tail, tip = candidate.tip;
+      if (!tail || !tip || ![tail.x, tail.y, tip.x, tip.y].every(
+        (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1)) return false;
+      const tailError = Math.hypot(tail.x - from.x, tail.y - from.y);
+      const tipError = Math.hypot(tip.x - to.x, tip.y - to.y);
+      const arrowLength = Math.hypot(tip.x - tail.x, tip.y - tail.y);
+      const actorLength = Math.hypot(to.x - from.x, to.y - from.y);
+      if (arrowLength < 0.025 || actorLength < 0.025 || tailError > 0.085 || tipError > 0.085)
+        return false;
+      const dot = ((tip.x - tail.x) * (to.x - from.x) +
+        (tip.y - tail.y) * (to.y - from.y)) / (arrowLength * actorLength);
+      if (dot < 0.75) return false;
+      // A nearby different shirt makes this a genuinely ambiguous endpoint.
+      return !photoActors.some((actor) => actor.id !== fromId &&
+          Math.hypot(actor.x - tail.x, actor.y - tail.y) + 0.025 < tailError) &&
+        !photoActors.some((actor) => actor.id !== toId &&
+          Math.hypot(actor.x - tip.x, actor.y - tip.y) + 0.025 < tipError);
+    };
     const connections = arrowRequests.flatMap((line) => {
       const a = firstByLine.get(line.id);
       const b = secondByLine.get(line.id);
@@ -1344,8 +1372,17 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       // pair does NOT count as agreement (the arrowhead is authoritative).
       const agreed = sameEndpoints(a, b) ? a :
         sameEndpoints(a, c) ? a : sameEndpoints(b, c) ? b : undefined;
+      // If the models disagree, accept only ONE distinct directed relation
+      // that independently matches the actual photographed tail and arrowhead.
+      // Multiple geometrically plausible relations remain unresolved.
+      const plausible = [a, b, c].filter(fitsMeasuredArrow);
+      const uniquePlausible = plausible.filter((candidate, index) =>
+        plausible.findIndex((other) => sameEndpoints(candidate, other)) === index);
+      const pixelVerified = !agreed && uniquePlausible.length === 1 ? uniquePlausible[0] : undefined;
       const fallback = a ?? b ?? c;
-      return fallback ? [{ ...(agreed ?? fallback), agreed: Boolean(agreed) }] : [];
+      const selected = agreed ?? pixelVerified ?? fallback;
+      return selected ? [{ ...selected, agreed: Boolean(agreed || pixelVerified),
+        pixelVerified: Boolean(pixelVerified) }] : [];
     });
     // Expose the AI's interpretation as diagnostics even when geometry rejects
     // a connection. Never present an unvalidated guess as a confirmed route.
@@ -1388,6 +1425,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         line: lineId + 1, from: describeActor(fromId), to: describeActor(toId),
         type: String(canvasArrows[lineId]?.type ?? "guideLine"),
         status: trainerInPass ? "afgewezen: trainer is geen passspeler" :
+          value.pixelVerified ? "bevestigd via pijlpixels" :
           value.agreed ? "voorgesteld" : "onzeker: analyses verschillen",
       };
     }
