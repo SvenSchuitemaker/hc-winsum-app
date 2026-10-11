@@ -907,8 +907,13 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           return [{ index, item }];
         });
         const pixels = anchors.filter((p) => p.shirtColor === color);
-        // Incomplete/over-detected pixel masks cannot safely reposition a layer.
-        if (!entries.length || entries.length !== pixels.length || entries.length > 12) continue;
+        // The orange mask sometimes includes one additional orange fragment.
+        // Choose the best distinct centers using the global assignment below,
+        // without changing the number of actual AI-inventoried shirts.
+        // All other teams retain their previously validated matching behavior.
+        const orangeExtraCandidate = color === "orange" && pixels.length === entries.length + 1;
+        if (!entries.length || entries.length > 12 ||
+            (!orangeExtraCandidate && entries.length !== pixels.length)) continue;
         // Exact global assignment for the small teams in coaching diagrams.
         // Its only job is to attach identities to fixed physical pixel centers.
         const memo = new Map<string, { cost: number; indices: number[] }>();
