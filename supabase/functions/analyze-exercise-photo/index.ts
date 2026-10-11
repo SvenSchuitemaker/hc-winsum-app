@@ -886,43 +886,47 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }) : [];
     const coneAnchors = validAnchors(body?.detectedCones);
     const playerAnchors = validAnchors(body?.detectedPlayers);
-    const anchorObjects = (values: unknown[], type: string, anchors: PixelAnchor[]) => {
+    // Use a local, mutual nearest-neighbour shirt match. Global greedy matching
+    // used to drag shirts across the field (up to 32% image width) and could
+    // associate a different player's pixel or a cone-shaped component.
+    const anchorPlayers = (values: unknown[], anchors: PixelAnchor[]) => {
       const updated = [...values];
       const entries = values.flatMap((value, index) => {
         if (!value || typeof value !== "object") return [];
         const item = value as Record<string, unknown>;
-        if (item.type !== type || !Number.isFinite(Number(item.x)) ||
-          !Number.isFinite(Number(item.y))) return [];
+        if (item.type !== "player" || typeof item.x !== "number" ||
+            typeof item.y !== "number") return [];
         return [{ index, item }];
       });
-      if (!entries.length || !anchors.length) return updated;
-      // Protect the inventory against false-positive pixel components.
-      // An equal count for each shirt color is required before pixel anchors
-      // replace player positions. For cones use exact inventory counts.
-      const groups = type === "player"
-        ? ["black", "grey", "orange", "blue", "white", "red", "green"] : [""];
-      for (const color of groups) {
-        const entryGroup = entries.filter(({ item }) => type !== "player" ||
-          String(item.shirtColor ?? "").toLowerCase() === color);
-        const pixelGroup = anchors.filter((p) => type !== "player" || p.shirtColor === color);
-        if (!entryGroup.length || entryGroup.length !== pixelGroup.length) continue;
-        // Minimum-total-distance bijection: assign every pixel to one item.
-        // Sorted candidate pairs prevent two nearby shirts sharing an anchor.
-        const pairs = entryGroup.flatMap(({ index, item }) => pixelGroup.map((p, pixelIndex) => ({
-          index, pixelIndex, p,
-          distance: Math.hypot(Number(item.x) - p.x, Number(item.y) - p.y),
-        }))).sort((a, b) => a.distance - b.distance);
-        const usedEntries = new Set<number>(), usedPixels = new Set<number>();
-        for (const match of pairs) {
-          if (usedEntries.has(match.index) || usedPixels.has(match.pixelIndex)) continue;
-          if (match.distance > 0.32) continue; // Never move across unrelated field regions.
-          updated[match.index] = {
-            ...(updated[match.index] as Record<string, unknown>),
-            x: match.p.x, y: match.p.y,
-          };
-          usedEntries.add(match.index);
-          usedPixels.add(match.pixelIndex);
-        }
+      const colorsMatch = (a: string, b: string) =>
+        a === b || (["black", "grey"].includes(a) && ["black", "grey"].includes(b));
+      const distances = entries.flatMap(({ index, item }) => anchors.flatMap((point, pixelIndex) => {
+        const color = String(item.shirtColor ?? "").toLowerCase();
+        const pixelColor = String(point.shirtColor ?? "").toLowerCase();
+        if (!colorsMatch(color, pixelColor)) return [];
+        const distance = Math.hypot(item.x as number - point.x, item.y as number - point.y);
+        // Large corrections indicate that the AI and pixel detector refer to
+        // different shirts. Retain the original AI position instead.
+        return distance <= 0.055 ? [{ index, pixelIndex, point, distance }] : [];
+      }));
+      const bestByItem = new Map<number, typeof distances[number]>();
+      const bestByPixel = new Map<number, typeof distances[number]>();
+      for (const candidate of distances.sort((a, b) => a.distance - b.distance)) {
+        if (!bestByItem.has(candidate.index)) bestByItem.set(candidate.index, candidate);
+        if (!bestByPixel.has(candidate.pixelIndex)) bestByPixel.set(candidate.pixelIndex, candidate);
+      }
+      for (const candidate of distances) {
+        if (bestByItem.get(candidate.index) !== candidate ||
+            bestByPixel.get(candidate.pixelIndex) !== candidate) continue;
+        const ambiguous = distances.some((other) => other !== candidate &&
+          ((other.index === candidate.index || other.pixelIndex === candidate.pixelIndex) &&
+            other.distance < candidate.distance + 0.012));
+        if (ambiguous) continue;
+        updated[candidate.index] = {
+          ...(updated[candidate.index] as Record<string, unknown>),
+          x: candidate.point.x,
+          y: candidate.point.y,
+        };
       }
       return updated;
     };
@@ -940,7 +944,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       : physicalSource;
     // The color-based shirt detector is advisory. Only replace a shirt center
     // when the same-color inventory and detected pixel count agree.
-    const pixelAnchored = anchorObjects(reliablePhysical, "player", playerAnchors);
+    const pixelAnchored = anchorPlayers(reliablePhysical, playerAnchors);
     const sourceObjects = [...pixelAnchored, ...sourceArrows];
     const uniqueItems = normalizedItems(sourceObjects, calibration).map((item) => {
       // Grey playing jerseys are displayed as black; retain grey coach T.
