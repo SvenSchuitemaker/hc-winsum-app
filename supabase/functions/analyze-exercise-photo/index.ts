@@ -243,6 +243,35 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
 }
 
 
+
+// A blind spot in the first trace can hide a line completely from later
+// actor-connection checks. Audit ONLY unaccounted physical arrowheads.
+async function auditMissingArrowheads(
+  key: string, model: string, mimeType: string, base64: string,
+  known: Array<{ x: number; y: number; x2: number; y2: number }>,
+): Promise<unknown[]> {
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0, response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "Audit the uploaded hockey diagram for BLACK triangular arrowheads MISSED by a prior trace. Trace each dark stroke BACKWARDS from its distinct visible tip to its actual tail. Do not assume any number of arrows, player passing sequence or shirt identities. The known arrow coordinates are approximate: compare against physical arrowheads in the picture, never invent an arrow between players, and never duplicate an already represented tip. Inspect particularly whether a diagonal stroke hidden partly behind a shirt has its OWN distinct arrowhead. Ignore white field markings, cones, jersey outlines and intersections without a triangular tip. Return JSON {items:[{type:'passLine'|'runLine'|'guideLine',x,y,x2,y2,strokeColor:'#111111',arrowHead:true,lineStyle:'straight',dashed:false}]}, with FULL original image normalized 0..1 coordinates. Return items:[] if all visible arrowheads are already represented. A solid black arrow is normally passLine, not runLine. No additional explanations." },
+          { role: "user", content: [
+            { type: "text", text: `Already traced tail/tip positions: ${JSON.stringify(known)}. Find only OTHER clearly visible BLACK arrowheads, each with a separate actual dark line from tail to tip. Do not create arrows based on player locations.` },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+          ] },
+        ],
+      }),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
+    return Array.isArray(parsed.items) ? parsed.items.slice(0, 12) : [];
+  } catch { return []; }
+}
+
 /**
  * Interpret a line as a relation between two already recognized jerseys.
  * Positions are never inferred or changed by this call; actor IDs refer only
@@ -1078,6 +1107,50 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           }
         } catch { /* An uncertain third arrow is better omitted than invented. */ }
       }
+    }
+    // Independently look for physical arrowheads not included in the first
+    // inventory. Nothing is added on model assertion alone: an independent
+    // image audit must confirm the SAME tail, tip and direction. This only
+    // adds to the arrow layer; actor positions remain completely unchanged.
+    if (focusedUnique.length) {
+      const pointDistance = (x: Record<string, unknown>, y: Record<string, unknown>, end: boolean) =>
+        Math.hypot(Number(end ? x.x2 : x.x) - Number(end ? y.x2 : y.x),
+                   Number(end ? x.y2 : x.y) - Number(end ? y.y2 : y.y));
+      try {
+        const missing = (await auditMissingArrowheads(key!, visionModel, mimeType, base64,
+          rawArrows.map(a => ({ x: Number(a.x), y: Number(a.y),
+            x2: Number(a.x2), y2: Number(a.y2) }))))
+          .map(normalizeArrowCoordinates).filter(
+            (a): a is Record<string, unknown> => a !== null);
+        // One physical arrowhead corresponds to one stroke. Do not supplement
+        // a line whose end is already represented, even with a different tail.
+        const uniqueMissing = missing.filter((candidate, i) =>
+          !missing.slice(0, i).some(other => pointDistance(candidate, other, true) < 0.035) &&
+          !rawArrows.some(other => pointDistance(candidate, other, true) < 0.035));
+        if (uniqueMissing.length) {
+          const independentlyChecked = await verifyArrowEndpoints(
+            key!, visionModel, mimeType, base64, uniqueMissing);
+          for (const checkedRaw of independentlyChecked) {
+            const checked = checkedRaw as Record<string, unknown>;
+            const index = Number(checked.id);
+            if (!Number.isInteger(index) || index < 0 || index >= uniqueMissing.length) continue;
+            const candidate = uniqueMissing[index];
+            const validated = normalizeArrowCoordinates(checked);
+            if (!validated || pointDistance(candidate, validated, false) > 0.035 ||
+                pointDistance(candidate, validated, true) > 0.035 ||
+                rawArrows.some(other => pointDistance(other, validated, true) < 0.035))
+              continue;
+            const dx = Number(candidate.x2) - Number(candidate.x);
+            const dy = Number(candidate.y2) - Number(candidate.y);
+            const vx = Number(validated.x2) - Number(validated.x);
+            const vy = Number(validated.y2) - Number(validated.y);
+            if ((dx * vx + dy * vy) / Math.max(0.000001,
+                Math.hypot(dx, dy) * Math.hypot(vx, vy)) < 0.95) continue;
+            rawArrows.push({ ...candidate, type: candidate.type === "runLine" &&
+              candidate.dashed === true ? "runLine" : "passLine" });
+          }
+        }
+      } catch { /* Do not add uncertain or unverified strokes. */ }
     }
     // Verify end points without ever touching the seven other independent
     // object layers. Reject large or reversed corrections as uncertain.
