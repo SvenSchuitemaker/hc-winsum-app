@@ -226,7 +226,7 @@ async function analyzeArrows(key: string, model: string, mimeType: string, base6
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify the type independently for EACH actual arrow: runLine for a player movement/running route (often dashed, zigzag, or distinctly styled as movement), passLine for a ball pass (often solid), and guideLine ONLY when the symbol does not reveal whether it represents running or passing. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
+        { role: "system", content: "You are tracing ONLY distinct arrows drawn over a field hockey diagram. Return JSON {items:[{type,x,y,x2,y2,strokeColor,dashed,arrowHead,lineStyle}]}. Use full-image normalized 0..1 coordinates. Output one item per genuine dark/black arrow. Classify the type independently for EACH actual arrow: runLine for a player movement/running route (often dashed, zigzag, or distinctly styled as movement), passLine for a ball pass (often solid), and guideLine ONLY when the symbol does not reveal whether it represents running or passing. Set strokeColor=#111111 for dark drawn arrows, arrowHead=true, lineStyle=straight unless actually curved. Preserve visible dashed style; never infer player movements or fabricate a route when none is drawn. Trace each visible dark arrow independently using only its actual dark stroke pixels. Before returning, verify the tail, arrowhead tip, and black stroke connecting them are all visible in the uploaded image. Do not join two separate arrows into one long line. Follow three-part paths as separate strokes only when separate arrowheads actually exist. Reject any line unsupported by dark pixels. Follow the connected stroke from its tail toward the triangular arrowhead, even if a shirt covers part of it. The source image may have three arrows, but DO NOT assume any count. Do NOT turn a field horizontal line, field boundary, jersey seam or caption into an arrow. Do not reuse the same arrowhead for different strokes. Output the actual tail center x,y and arrow TIP x2,y2, in 0..1 FULL IMAGE coordinates; distinguish arrow lines from white field lines. If an arrow goes from a shirt to another shirt, use the visible black stroke endpoints rather than estimating tactical connections. Locate the center of each arrow tail and precise arrow TIP. Exclude white field boundaries and circles, player shirt seams, and decorative marks. If none visible return items:[]. Do not add players or cones." },
         { role: "user", content: [
           { type: "text", text: "Trace only the original drawn arrows, preserving direction and endpoints. Return the original image coordinates." },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -902,6 +902,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         (item): item is Record<string, unknown> => item !== null);
     // Focused arrow tracing takes priority; never merge unrelated candidate
     // lines from the general drill description into the same pass layer.
+    // A dedicated arrow pass is more trustworthy than tactical inference
+    // in the general exercise description. Never supplement it with imagined
+    // general-pass arrows when dedicated analysis returned usable strokes.
     const rawArrows = focusedNormalized.length ? focusedNormalized : genericNormalized;
     // Keep pass routes, running routes and genuinely ambiguous guides separate.
     // Do not snap endpoints to players or change the route semantics.
@@ -1035,6 +1038,26 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       })) {
         // Unknown jersey number is intentionally left blank rather than guessed.
         recoveredPhysical.push({ type: "player", shirtColor: "orange",
+          x: unmatched[0].x, y: unmatched[0].y, label: "" });
+      }
+    }
+    // Independently restore a missed BLUE support jersey only with clear
+    // measured photo-pixel evidence. Never use cone, line or team positions.
+    const blueFound = recoveredPhysical.filter((v) => {
+      const item = v as Record<string, unknown>;
+      return item.type === "player" && String(item.shirtColor).toLowerCase() === "blue";
+    }) as Record<string, unknown>[];
+    const bluePixels = playerAnchors.filter((p) => p.shirtColor === "blue");
+    if (bluePixels.length === blueFound.length + 1 && blueFound.length >= 1) {
+      const unmatched = bluePixels.filter((p) =>
+        !blueFound.some((shirt) => Math.hypot(Number(shirt.x) - p.x, Number(shirt.y) - p.y) < 0.09));
+      if (unmatched.length === 1 &&
+          recoveredPhysical.every((v) => {
+            const item = v as Record<string, unknown>;
+            return item.type !== "player" ||
+              Math.hypot(Number(item.x) - unmatched[0].x, Number(item.y) - unmatched[0].y) > 0.065;
+          })) {
+        recoveredPhysical.push({ type: "player", shirtColor: "blue",
           x: unmatched[0].x, y: unmatched[0].y, label: "" });
       }
     }
