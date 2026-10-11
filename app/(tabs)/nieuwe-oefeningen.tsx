@@ -59,7 +59,7 @@ export default function NieuweOefeningenScreen() {
     const [importMode, setImportMode] = useState<"photo" | "ai">("photo");
     const [analyzing, setAnalyzing] = useState(false);
     const [importError, setImportError] = useState("");
-    const [importAudit, setImportAudit] = useState<{ inventory: Record<string, number>; placed: Record<string, number>; warnings: string[] } | null>(null);
+    const [importAudit, setImportAudit] = useState<{ inventory: Record<string, number>; placed: Record<string, number>; warnings: string[]; lineConnections?: Array<{ line: number; from: string; to: string; type: string; status: string }> } | null>(null);
     const [importLayers, setImportLayers] = useState<Record<string, { status: "ok" | "warning" | "empty"; detected: number; placed: number; reason: string }> | null>(null);
     const [boardVersion, setBoardVersion] = useState(0);
     const [subtitle, setSubtitle] = useState("");
@@ -386,6 +386,15 @@ export default function NieuweOefeningenScreen() {
                                     {type}: {count} geplaatst{importAudit.inventory[type] !== undefined ? ` / ${importAudit.inventory[type]} herkend` : ""}
                                 </Text>
                             ))}
+                            <Text style={styles.label}>Herkende lijnen en verbindingen</Text>
+                            {(importAudit.lineConnections ?? []).map((line) => (
+                                <Text key={line.line} style={styles.helpText}>
+                                    {`${line.line}. ${line.from} → ${line.to} (${line.type === "runLine" ? "looplijn" : "passlijn"}; ${line.status})`}
+                                </Text>
+                            ))}
+                            {!importAudit.lineConnections?.length && (
+                                <Text style={styles.helpText}>Geen afzonderlijke spelerverbindingen beschikbaar.</Text>
+                            )}
                             {importAudit.warnings.map((warning, index) => (
                                 <Text key={index} style={styles.importError}>{warning}</Text>
                             ))}
