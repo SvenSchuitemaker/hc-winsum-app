@@ -50,3 +50,8 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: npx --yes supabase@latest functions deploy import-chat-exercises --project-ref shllbltitjogepjeyxdr --no-verify-jwt
+
+      - name: Deploy authenticated HockeyApp MCP bridge
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npx --yes supabase@latest functions deploy hockeyapp-mcp --project-ref shllbltitjogepjeyxdr --no-verify-jwt
