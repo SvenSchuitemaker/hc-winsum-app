@@ -39,7 +39,7 @@ Deno.serve(async request => {
       method:"POST",headers:{"Authorization":`Bearer ${key}`,"Content-Type":"application/json"},
       body:JSON.stringify({model:"gpt-4.1-mini",temperature:0,response_format:{type:"json_object"},
         messages:[
-          {role:"system",content:`Lees de hockeyoefening rechtstreeks van de foto. Lever JSON met exact deze velden: title,subtitle,explanation,instructions,simplify,build_up,difficulty,audience,category_slug. Gebruik uitsluitend aantoonbare tekst of nauwkeurig afgeleide aanwijzingen, nooit een verzonnen oefening. Maak een SPECIFIEKE, betekenisvolle Nederlandse titel van circa 4-9 woorden die deze oefening herkenbaar onderscheidt van andere oefeningen. Benoem waar zichtbaar de technische actie (bijvoorbeeld passen, aannemen, vrijlopen, afronden), het patroon of de spelvorm (bijvoorbeeld driehoek, kom, 3-tegen-2, doorschuiven) en eventueel het trainingsdoel. Gebruik alleen kenmerken die werkelijk uit de foto of begeleidende tekst blijken. Een bij de afbeelding gedrukte titel als "Vereenvoudigde passoefening 9" is een bronlabel en mag NIET letterlijk als titel worden overgenomen. Vermijd generieke titels zoals "Passoefening", "Hockeyoefening 3", "Training 9" of "Vereenvoudigde passoefening 9"; vermijd losstaande volg- of oefeningnummers en marketingtaal. Verzamel eerst de concrete kenmerken en schrijf daarna één korte, natuurlijke titel; verzin nooit een opstelling als deze niet zichtbaar is. Gebruik een bestaande category_slug uit ${JSON.stringify(categoryList)}. difficulty: Makkelijk/Gemiddeld/Moeilijk. audience: kies alleen toepasselijke codes uit JO8,JO10,JO12,JO14,JO16,JO18,MO8,MO10,MO12,MO14,MO16,MO18,Senioren. Voeg JO en MO voor dezelfde leeftijd toe bij gelijke geschiktheid. Geef in instructions de organisatie en stappen uit de afbeelding, in explanation het doel en verloop. Geen tekeninstructies of afbeeldingsdata produceren.`},
+          {role:"system",content:`Lees de hockeyoefening rechtstreeks van de foto. Lever JSON met exact deze velden: title,subtitle,explanation,instructions,simplify,build_up,difficulty,audience,category_slug. Gebruik uitsluitend aantoonbare tekst of nauwkeurig afgeleide aanwijzingen, nooit een verzonnen oefening. Maak een SPECIFIEKE, betekenisvolle Nederlandse titel van circa 4-9 woorden die deze oefening herkenbaar onderscheidt van andere oefeningen. Benoem waar zichtbaar de technische actie (bijvoorbeeld passen, aannemen, vrijlopen, afronden), het patroon of de spelvorm (bijvoorbeeld driehoek, kom, 3-tegen-2, doorschuiven) en eventueel het trainingsdoel. Gebruik alleen kenmerken die werkelijk uit de foto of begeleidende tekst blijken. Een bij de afbeelding gedrukte titel als "Vereenvoudigde passoefening 9" is een bronlabel en mag NIET letterlijk als titel worden overgenomen. Vermijd generieke titels zoals "Passoefening", "Hockeyoefening 3", "Training 9" of "Vereenvoudigde passoefening 9"; vermijd losstaande volg- of oefeningnummers en marketingtaal. Verzamel eerst de concrete kenmerken en schrijf daarna één korte, natuurlijke titel; verzin nooit een opstelling als deze niet zichtbaar is. Gebruik een bestaande category_slug uit ${JSON.stringify(categoryList)}. difficulty: Makkelijk/Gemiddeld/Moeilijk. audience: kies alleen toepasselijke codes uit JO8,JO10,JO12,JO14,JO16,JO18,MO8,MO10,MO12,MO14,MO16,MO18,Senioren. Voeg JO en MO voor dezelfde leeftijd toe bij gelijke geschiktheid. VUL ELK TEKSTVELD inhoudelijk in (geen lege strings): subtitle = een korte samenvatting met belangrijkste doel/vaardigheid; explanation = doel, opstelling en verloop in begrijpelijk Nederlands; instructions = genummerde, uitvoerbare stappen voor de trainer; simplify = één concrete, veilig uitvoerbare vereenvoudiging van dezelfde oefening; build_up = één concrete, uitdagendere uitbreiding van dezelfde oefening. Voor simplify en build_up mag je traineradvies voorstellen op basis van de herkende basisvorm, maar verzin geen feiten over de foto. De voorstellen moeten passen bij de waargenomen oefening en realistisch uitvoerbaar zijn. Gebruik bij onduidelijke details neutrale formuleringen en geen bedachte aantallen spelers, materialen of afstanden. Kies een passende difficulty en minstens één audience, zolang de leeftijdsgeschiktheid redelijk uit de oefening kan worden afgeleid. category_slug moet altijd één van de bestaande categorieën zijn. Gebruik Nederlands, concrete hockeytermen en geen lege standaardtekst. Geen tekeninstructies of afbeeldingsdata produceren.`},
           {role:"user",content:[{type:"text",text:"Lees alle relevante tekst van deze hockeyoefening en classificeer."},
             {type:"image_url",image_url:{url:`data:${mime};base64,${base64}`,detail:"high"}}]},
         ]}),
@@ -83,6 +83,40 @@ Deno.serve(async request => {
         return response({error:"AI kon geen onderscheidende titel bepalen. Voeg meer informatie toe aan de foto en probeer opnieuw."},422);
       }
     }
+    // Fill any omitted text fields in a second, lightweight pass using only the
+    // recognised exercise. Variations are suggestions, not claims about the photo.
+    const requiredText = ["subtitle","explanation","instructions","simplify","build_up"] as const;
+    const missing = requiredText.filter(field => !text(parsed[field],4000));
+    if (missing.length) {
+      try {
+        const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "gpt-4.1-mini", temperature: 0.2,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: "Je bent een ervaren Nederlandse hockeytrainer. Vul ALLEEN de ontbrekende velden in en antwoord JSON. subtitle = kort doel; explanation = doel en verloop; instructions = concrete genummerde stappen; simplify = voorstel voor eenvoudiger variant; build_up = voorstel voor moeilijker variant. Gebruik uitsluitend de aangeleverde feiten. Voor beide varianten mag je haalbare trainersuggesties maken, geen feiten over de bronfoto verzinnen. Geen lege strings, geen willekeurige aantallen of afstanden." },
+              { role: "user", content: JSON.stringify({
+                missing, title, category_slug: slug,
+                recognised: Object.fromEntries(requiredText.map(field => [field,text(parsed[field],3000)])),
+              }) },
+            ],
+          }),
+        });
+        if (completion.ok) {
+          const data = await completion.json();
+          const values = JSON.parse(data?.choices?.[0]?.message?.content ?? "{}");
+          for (const field of missing) {
+            const candidate = text(values[field],4000);
+            if (candidate) parsed[field] = candidate;
+          }
+        }
+      } catch {
+        // Return recognised content if the optional completion is unavailable.
+      }
+    }
+    const missing_fields = requiredText.filter(field => !text(parsed[field],4000));
     const audience = Array.isArray(parsed.audience)
       ? [...new Set(parsed.audience.filter((v:unknown)=>typeof v==="string" && ageGroups.has(v)))] : [];
     return response({
@@ -94,6 +128,7 @@ Deno.serve(async request => {
       build_up:text(parsed.build_up,4000),
       difficulty:levels.has(parsed.difficulty)?parsed.difficulty:"Gemiddeld",
       audience,
+      missing_fields,
     });
   } catch { return response({error:"AI-tekstherkenning mislukt."},500); }
 });
