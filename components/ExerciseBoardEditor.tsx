@@ -94,6 +94,9 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             clearSelection() {
                 setSelectedItemId(null);
             },
+            setCaptureMode(enabled: boolean) {
+                setCaptureMode(enabled);
+            },
             getCaptureTarget() {
                 return captureTargetRef.current;
             },
