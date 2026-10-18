@@ -5,6 +5,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Platform,
     Pressable,
     ScrollView,
     Share,
@@ -63,6 +64,7 @@ export default function ExerciseDetailScreen() {
     const [isFavorite, setIsFavorite] = useState(false);
     const [favoriteLoading, setFavoriteLoading] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState("");
 
     const isAdmin = role === "super_admin";
     const isDesktop = width >= 900;
@@ -200,8 +202,14 @@ export default function ExerciseDetailScreen() {
     }
 
     function confirmDelete() {
-        if (!isAdmin) {
-            Alert.alert("Geen toegang", "Alleen admins mogen oefeningen verwijderen.");
+        if (!isAdmin || deleting) return;
+        setDeleteError("");
+
+        // React Native Alert.alert does not show confirmation dialogs on web.
+        if (Platform.OS === "web") {
+            if (window.confirm("Weet je zeker dat je deze oefening wilt verwijderen?")) {
+                void handleDelete();
+            }
             return;
         }
 
@@ -210,27 +218,41 @@ export default function ExerciseDetailScreen() {
             "Weet je zeker dat je deze oefening wilt verwijderen?",
             [
                 { text: "Annuleren", style: "cancel" },
-                { text: "Verwijderen", style: "destructive", onPress: handleDelete },
+                { text: "Verwijderen", style: "destructive", onPress: () => void handleDelete() },
             ]
         );
     }
 
     async function handleDelete() {
+        if (deleting) return;
         try {
             setDeleting(true);
+            setDeleteError("");
 
             if (!supabase || !exercise) {
                 throw new Error("Oefening niet geladen.");
             }
 
-            const { error } = await supabase.from("exercises").delete().eq("id", exercise.id);
+            // Returning the deleted ID prevents reporting success when an RLS
+            // policy silently filters the DELETE to zero matching rows.
+            const { data, error } = await supabase
+                .from("exercises")
+                .delete()
+                .eq("id", exercise.id)
+                .select("id");
 
             if (error) throw error;
+            if (!data?.some((item) => item.id === exercise.id)) {
+                throw new Error("De oefening is niet verwijderd. Controleer je beheerdersrechten.");
+            }
 
-            Alert.alert("Verwijderd", "De oefening is verwijderd.");
             router.replace(`/category/${exercise.category_slug}`);
         } catch (error) {
-            Alert.alert("Fout", error instanceof Error ? error.message : "Verwijderen mislukt.");
+            const message = error instanceof Error ? error.message : "Verwijderen mislukt.";
+            setDeleteError(message);
+            if (Platform.OS !== "web") {
+                Alert.alert("Verwijderen mislukt", message);
+            }
         } finally {
             setDeleting(false);
         }
@@ -293,6 +315,10 @@ export default function ExerciseDetailScreen() {
                         )}
                     </Pressable>
                 </View>
+
+                {isAdmin && !!deleteError && (
+                    <Text style={styles.deleteErrorText} accessibilityRole="alert">{deleteError}</Text>
+                )}
 
                 {isAdmin && (
                     <View style={styles.adminActionRow}>
@@ -424,6 +450,10 @@ const styles = StyleSheet.create({
     },
     deleteButtonDisabled: {
         opacity: 0.7,
+    },
+    deleteErrorText: {
+        color: "#FF7777",
+        marginBottom: SPACING.sm,
     },
     badgesRow: {
         flexDirection: "row",
