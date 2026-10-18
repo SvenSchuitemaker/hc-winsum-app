@@ -82,6 +82,7 @@ export type ExerciseBoardLayout = {
 export type ExerciseBoardEditorRef = {
     clearSelection: () => void;
     getCaptureTarget: () => View | null;
+    setCaptureMode: (enabled: boolean) => void;
 };
 
 export type ToolOption = {

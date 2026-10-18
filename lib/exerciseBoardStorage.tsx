@@ -22,14 +22,19 @@ export async function uploadExerciseBoardPreview(params: {
     }
 
     params.boardRef?.clearSelection();
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    const uri = await captureRef(captureTarget, {
-        format: "png",
-        quality: 1,
-        result: "tmpfile",
-    });
+    // Never include a tracing/reference photo in the saved board preview.
+    params.boardRef?.setCaptureMode(true);
+    let uri: string;
+    try {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        uri = await captureRef(captureTarget, {
+            format: "png",
+            quality: 1,
+            result: "tmpfile",
+        });
+    } finally {
+        params.boardRef?.setCaptureMode(false);
+    }
 
     const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,

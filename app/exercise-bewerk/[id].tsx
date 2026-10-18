@@ -1,4 +1,5 @@
 import { Picker } from "@react-native-picker/picker";
+import { selectExercisePhoto } from "../../lib/exercisePhotoImport";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -80,6 +81,9 @@ export default function ExerciseBewerkScreen() {
     const [boardLayout, setBoardLayout] = useState<ExerciseBoardLayout>(createEmptyBoardLayout());
     const [regenerateBoardPreview, setRegenerateBoardPreview] = useState(false);
     const [boardChanged, setBoardChanged] = useState(false);
+    const [tracePhotoUri, setTracePhotoUri] = useState<string | null>(null);
+    const [boardEditorVersion, setBoardEditorVersion] = useState(0);
+    const [traceError, setTraceError] = useState("");
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -126,7 +130,9 @@ export default function ExerciseBewerkScreen() {
             setBuildUp(exercise.build_up || "");
             setDifficulty(exercise.difficulty || "");
             setSelectedAudiences(exercise.audience || []);
-            setBoardLayout(exercise.board_layout || createEmptyBoardLayout());
+            setBoardLayout({ ...(exercise.board_layout || createEmptyBoardLayout()), backgroundImageUrl: null });
+            setTracePhotoUri(null);
+            setBoardEditorVersion((version) => version + 1);
             setRegenerateBoardPreview(false);
             setBoardChanged(false);
         } catch (error) {
@@ -162,6 +168,42 @@ export default function ExerciseBewerkScreen() {
         });
     }, []);
 
+    async function chooseTracePhoto() {
+        try {
+            setTraceError("");
+            const photo = await selectExercisePhoto();
+            if (!photo) return;
+            setTracePhotoUri(photo.uri);
+            setBoardLayout((current) => ({
+                ...current,
+                backgroundImageUrl: photo.uri,
+                backgroundOpacity: 0.65,
+                backgroundCalibration: {
+                    bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+                    rotation: 0,
+                    flipHorizontal: false,
+                },
+            }));
+            // The board editor hydrates its layout once on mount.
+            setBoardEditorVersion((version) => version + 1);
+            setBoardChanged(true);
+        } catch (error) {
+            setTraceError(error instanceof Error ? error.message : "Foto kiezen mislukt.");
+        }
+    }
+
+    function removeTracePhoto() {
+        setTracePhotoUri(null);
+        setTraceError("");
+        setBoardLayout((current) => ({
+            ...current,
+            backgroundImageUrl: null,
+            backgroundCalibration: undefined,
+        }));
+        setBoardEditorVersion((version) => version + 1);
+        setBoardChanged(true);
+    }
+
     async function handleSave() {
         if (!user || !isAdmin) {
             Alert.alert("Geen toegang", "Alleen admins mogen oefeningen bewerken.");
@@ -186,11 +228,14 @@ export default function ExerciseBewerkScreen() {
             }
 
             const hasBoardItems = boardLayout.items.length > 0;
+            if (tracePhotoUri && !hasBoardItems) {
+                throw new Error("Teken eerst de oefening over de foto voordat je opslaat.");
+            }
 
             const shouldGenerateBoardPreview =
                 hasBoardItems &&
                 !!boardPreviewRef.current &&
-                (regenerateBoardPreview || boardChanged || !imageUrl.trim());
+                (regenerateBoardPreview || boardChanged || !imageUrl.trim() || !!tracePhotoUri);
 
             let nextImageUrl = imageUrl.trim() || null;
 
@@ -215,7 +260,12 @@ export default function ExerciseBewerkScreen() {
                     build_up: buildUp.trim() || null,
                     difficulty,
                     audience: selectedAudiences,
-                    board_layout: hasBoardItems ? boardLayout : null,
+                    // The local trace photo is never persisted with the editable board.
+                    board_layout: hasBoardItems ? {
+                        ...boardLayout,
+                        backgroundImageUrl: null,
+                        backgroundCalibration: undefined,
+                    } : null,
                 })
                 .eq("id", Number(id));
 
@@ -295,6 +345,23 @@ export default function ExerciseBewerkScreen() {
                     value={title}
                     onChangeText={setTitle}
                 />
+
+                <Text style={styles.label}>Foto om over te trekken</Text>
+                <Text style={styles.helpText}>
+                    Gebruik een geüploade foto tijdelijk achter het tekenbord. Bij opslaan
+                    wordt alleen de getekende versie als oefeningafbeelding bewaard.
+                </Text>
+                <Pressable style={styles.toggleButton} onPress={() => void chooseTracePhoto()} disabled={saving}>
+                    <Text style={styles.toggleButtonText}>
+                        {tracePhotoUri ? "Overtrekfoto vervangen" : "Foto uploaden om over te trekken"}
+                    </Text>
+                </Pressable>
+                {!!tracePhotoUri && (
+                    <Pressable style={styles.toggleButton} onPress={removeTracePhoto} disabled={saving}>
+                        <Text style={styles.toggleButtonText}>Overtrekfoto verwijderen</Text>
+                    </Pressable>
+                )}
+                {!!traceError && <Text style={{ color: "#FF7777", marginTop: 8 }}>{traceError}</Text>}
 
                 <Text style={styles.label}>Afbeelding URL (optioneel)</Text>
                 <TextInput
@@ -436,6 +503,7 @@ export default function ExerciseBewerkScreen() {
             </View>
 
             <ExerciseBoardEditor
+                key={boardEditorVersion}
                 ref={boardPreviewRef}
                 value={boardLayout}
                 onChange={handleBoardChange}
