@@ -50,6 +50,27 @@ export async function selectExercisePhoto(): Promise<SelectedExercisePhoto | nul
     return { uri: asset.uri, mimeType, base64: asset.base64 };
 }
 
+/** Select up to 20 photos for sequential AI OCR and original-photo upload. */
+export async function selectExercisePhotos(): Promise<SelectedExercisePhoto[]> {
+    const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        selectionLimit: 20,
+        orderedSelection: true,
+        quality: 1,
+        base64: true,
+    });
+    if (result.canceled) return [];
+    const selected: SelectedExercisePhoto[] = [];
+    for (const asset of result.assets) {
+        const mimeType = asset.mimeType || "image/jpeg";
+        // Reject unsupported / oversized files individually during bulk import.
+        selected.push({ uri: asset.uri, mimeType, base64: asset.base64 || "" });
+    }
+    return selected;
+}
+
 export async function uploadExercisePhoto(photo: SelectedExercisePhoto, userId: string) {
     if (!supabase) throw new Error("Supabase is niet geladen.");
     const extension = photo.mimeType === "image/png" ? "png" : photo.mimeType === "image/webp" ? "webp" : "jpg";
