@@ -116,6 +116,16 @@ export default function NieuweOefeningenScreen() {
             const selected = await selectExercisePhoto();
             if (!selected) return;
             setImportPhoto(selected);
+            // Do not carry metadata from an earlier uploaded drill into this import.
+            setTitle("");
+            setSubtitle("");
+            setExplanation("");
+            setInstructions("");
+            setSimplify("");
+            setBuildUp("");
+            setDifficulty("");
+            setSelectedAudiences([]);
+            if (categories.length) setCategorySlug(categories[0].slug);
             setImportAudit(null);
         setImportLayers(null);
             setImportLayers(null);
