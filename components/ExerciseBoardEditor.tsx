@@ -59,6 +59,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
         const [backgroundOpacity, setBackgroundOpacity] = useState(initialLayoutRef.current.backgroundOpacity ?? 0.65);
         const [backgroundCalibration, setBackgroundCalibration] = useState(initialLayoutRef.current.backgroundCalibration);
         const [showBackground, setShowBackground] = useState(!!initialLayoutRef.current.backgroundImageUrl);
+        const [captureMode, setCaptureMode] = useState(false);
         const [selectedTool, setSelectedTool] = useState<ToolType>("select");
         const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
         const [boardSize, setBoardSize] = useState({ width: 1, height: 1 });
@@ -433,7 +434,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         backgroundImageUrl={backgroundImageUrl}
                         backgroundOpacity={backgroundOpacity}
                         backgroundCalibration={backgroundCalibration}
-                        showBackground={showBackground}
+                        showBackground={showBackground && !captureMode}
                     />
                 </View>
 
