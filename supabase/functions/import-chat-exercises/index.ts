@@ -73,7 +73,7 @@ function normalize(raw: unknown) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method !== "POST") return response({ error: "POST required." }, 405);
+  if (request.method !== "POST" && request.method !== "GET") return response({ error: "GET or POST required." }, 405);
   // Do not permit browser cross-origin submission; intended for server-to-server use.
   const configured = Deno.env.get("EXERCISE_IMPORT_TOKEN") || "";
   const url = Deno.env.get("SUPABASE_URL") || "";
@@ -81,6 +81,11 @@ Deno.serve(async (request) => {
   if (!configured || configured.length < 32 || !url || !serviceKey) return response({ error: "Import service is not configured." }, 503);
   const supplied = request.headers.get("x-import-token") || "";
   if (!supplied || !equalSecret(supplied, configured)) return response({ error: "Unauthorized." }, 401);
+  if (request.method === "GET") {
+    const client = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data, error } = await client.from("categories").select("slug,title").order("title");
+    return error ? response({ error: "Could not load categories." }, 503) : response({ categories: data });
+  }
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_BODY_BYTES) return response({ error: "Payload too large." }, 413);
   let rawBody: string;
