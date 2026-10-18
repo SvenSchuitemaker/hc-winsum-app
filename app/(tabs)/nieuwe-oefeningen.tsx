@@ -116,6 +116,16 @@ export default function NieuweOefeningenScreen() {
             const selected = await selectExercisePhoto();
             if (!selected) return;
             setImportPhoto(selected);
+            // Do not carry metadata from an earlier uploaded drill into this import.
+            setTitle("");
+            setSubtitle("");
+            setExplanation("");
+            setInstructions("");
+            setSimplify("");
+            setBuildUp("");
+            setDifficulty("");
+            setSelectedAudiences([]);
+            if (categories.length) setCategorySlug(categories[0].slug);
             setImportAudit(null);
         setImportLayers(null);
             setImportLayers(null);
@@ -282,26 +292,73 @@ export default function NieuweOefeningenScreen() {
     }
 
     async function analyzePhoto() {
-        if (!importPhoto) return;
+        if (!importPhoto || !supabase) return;
         try {
             setAnalyzing(true);
             setImportError("");
-            const result = await analyzeExercisePhoto(importPhoto);
-            setImportAudit(result.import_audit ?? null);
-            setImportLayers(result.layers ?? null);
-            if (result.title) setTitle(result.title);
-            if (result.subtitle) setSubtitle(result.subtitle);
-            if (result.explanation) setExplanation(result.explanation);
-            if (result.instructions) setInstructions(result.instructions);
-            setBoardLayout({
-                ...result.board_layout,
-                backgroundImageUrl: importPhoto.uri,
-                backgroundCalibration: result.field_calibration,
-                backgroundOpacity: 0.65,
-            });
-            setBoardVersion((version) => version + 1);
-            if (!result.board_layout.items.length) {
-                setImportError("Geen herkenbare tekenobjecten gevonden. Je kunt de foto wel rechtstreeks opslaan.");
+            // Both analyses use the same source image: diagram placement and complete
+            // trainer-facing exercise metadata are independent of each other.
+            const [drawing, metadata] = await Promise.allSettled([
+                analyzeExercisePhoto(importPhoto),
+                supabase.functions.invoke("read-exercise-text", {
+                    body: { mimeType: importPhoto.mimeType, base64: importPhoto.base64 },
+                }),
+            ]);
+
+            if (drawing.status === "fulfilled") {
+                const result = drawing.value;
+                setImportAudit(result.import_audit ?? null);
+                setImportLayers(result.layers ?? null);
+                setBoardLayout({
+                    ...result.board_layout,
+                    backgroundImageUrl: importPhoto.uri,
+                    backgroundCalibration: result.field_calibration,
+                    backgroundOpacity: 0.65,
+                });
+                setBoardVersion((version) => version + 1);
+            } else {
+                setImportLayers(null);
+                setImportAudit(null);
+            }
+
+            const metadataData = metadata.status === "fulfilled" &&
+                !metadata.value.error && !metadata.value.data?.error
+                ? metadata.value.data : null;
+
+            if (metadataData && categories.some((category) => category.slug === metadataData.category_slug)) {
+                setCategorySlug(metadataData.category_slug);
+                if (metadataData.title) setTitle(metadataData.title);
+                if (metadataData.subtitle) setSubtitle(metadataData.subtitle);
+                if (metadataData.explanation) setExplanation(metadataData.explanation);
+                if (metadataData.instructions) setInstructions(metadataData.instructions);
+                if (metadataData.simplify) setSimplify(metadataData.simplify);
+                if (metadataData.build_up) setBuildUp(metadataData.build_up);
+                if (difficultyOptions.includes(metadataData.difficulty)) setDifficulty(metadataData.difficulty);
+                if (Array.isArray(metadataData.audience)) {
+                    setSelectedAudiences(metadataData.audience.filter((value: string) => audienceOptions.includes(value)));
+                }
+                const missing = Array.isArray(metadataData.missing_fields) ? metadataData.missing_fields : [];
+                if (missing.length) {
+                    setImportError("AI kon niet alle velden invullen (" + missing.join(", ") +
+                        "). Controleer en vul deze handmatig aan.");
+                }
+            } else if (drawing.status === "fulfilled") {
+                const result = drawing.value;
+                if (result.title) setTitle(result.title);
+                if (result.subtitle) setSubtitle(result.subtitle);
+                if (result.explanation) setExplanation(result.explanation);
+                if (result.instructions) setInstructions(result.instructions);
+                setImportError("Het tekenbord is gemaakt, maar de overige tekstvelden konden niet automatisch worden ingevuld.");
+            }
+
+            if (drawing.status === "rejected") {
+                const drawingMessage = drawing.reason instanceof Error ? drawing.reason.message : "AI-tekening mislukt.";
+                setImportError("Bewerkbare tekening kon niet worden gemaakt: " + drawingMessage);
+            } else if (!drawing.value.board_layout.items.length) {
+                setImportError("Geen herkenbare tekenobjecten. De tekstvelden zijn waar mogelijk wel ingevuld.");
+            }
+            if (drawing.status === "rejected" && !metadataData) {
+                throw drawing.reason;
             }
         } catch (error) {
             setImportError(error instanceof Error ? error.message : "AI-analyse mislukt.");
