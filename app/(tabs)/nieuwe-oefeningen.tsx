@@ -1,5 +1,6 @@
 import { Picker } from "@react-native-picker/picker";
 import { useEffect, useRef, useState } from "react";
+import { router } from "expo-router";
 import {
     ActivityIndicator,
     Image,
@@ -21,7 +22,7 @@ import {
     uploadExerciseBoardPreview,
 } from "../../lib/exerciseBoardStorage";
 import { supabase } from "../../lib/supabase";
-import { analyzeExercisePhoto, selectExercisePhoto, uploadExercisePhoto, type SelectedExercisePhoto } from "../../lib/exercisePhotoImport";
+import { analyzeExercisePhoto, selectExercisePhoto, selectExercisePhotos, uploadExercisePhoto, type SelectedExercisePhoto } from "../../lib/exercisePhotoImport";
 
 type DbCategory = {
     id: number;
@@ -58,6 +59,8 @@ export default function NieuweOefeningenScreen() {
     const [importPhoto, setImportPhoto] = useState<SelectedExercisePhoto | null>(null);
     const [importMode, setImportMode] = useState<"photo" | "ai">("photo");
     const [analyzing, setAnalyzing] = useState(false);
+    const [bulkProgress, setBulkProgress] = useState("");
+    const [bulkResults, setBulkResults] = useState<Array<{ file: string; status: "toegevoegd" | "overgeslagen" | "fout"; details: string; id?: number }>>([]);
     const [importError, setImportError] = useState("");
     const [importAudit, setImportAudit] = useState<{ inventory: Record<string, number>; placed: Record<string, number>; warnings: string[]; lineConnections?: Array<{ line: number; from: string; to: string; type: string; status: string }> } | null>(null);
     const [importLayers, setImportLayers] = useState<Record<string, { status: "ok" | "warning" | "empty"; detected: number; placed: number; reason: string }> | null>(null);
@@ -192,6 +195,90 @@ export default function NieuweOefeningenScreen() {
         } finally {
             setAnalyzing(false);
         }
+    }
+
+    async function bulkImportPhotos() {
+        if (!isSuperAdmin || !user?.id || !supabase || analyzing || loading) {
+            setImportError("Log in als hoofdbeheerder om foto's te importeren.");
+            return;
+        }
+        setImportError("");
+        setFormSuccess("");
+        setBulkResults([]);
+        let photos: SelectedExercisePhoto[];
+        try {
+            photos = await selectExercisePhotos();
+        } catch (error) {
+            setImportError(error instanceof Error ? error.message : "Selecteren mislukt.");
+            return;
+        }
+        if (!photos.length) return;
+        setAnalyzing(true);
+        const results: Array<{ file: string; status: "toegevoegd" | "overgeslagen" | "fout"; details: string; id?: number }> = [];
+        for (let index = 0; index < photos.length; index++) {
+            const photo = photos[index];
+            const file = "Foto " + (index + 1);
+            setBulkProgress("Bezig met " + file + " van " + photos.length + "…");
+            try {
+                if (!["image/jpeg", "image/png", "image/webp"].includes(photo.mimeType) ||
+                    photo.base64.length < 20 || photo.base64.length > 7_000_000) {
+                    throw new Error("Niet ondersteund formaat of groter dan 5 MB.");
+                }
+                const { data, error } = await supabase.functions.invoke("read-exercise-text", {
+                    body: { mimeType: photo.mimeType, base64: photo.base64 },
+                });
+                if (error || !data || data.error || typeof data.title !== "string" ||
+                    !categories.some((category) => category.slug === data.category_slug)) {
+                    throw new Error(data?.error || "Tekstherkenning of categorie ongeldig.");
+                }
+                const { data: existing, error: lookupError } = await supabase.from("exercises")
+                    .select("id").eq("category_slug", data.category_slug).ilike("title", data.title).limit(1);
+                if (lookupError) throw lookupError;
+                if (existing?.length) {
+                    results.push({ file, status: "overgeslagen", details: data.title + " bestaat al (#" + existing[0].id + ")." });
+                } else {
+                    const imageUrl = await uploadExercisePhoto(photo, user.id);
+                    try {
+                        const { data: saved, error: saveError } = await supabase.from("exercises").insert({
+                            title: data.title,
+                            category_slug: data.category_slug,
+                            image_url: imageUrl,
+                            subtitle: data.subtitle || null,
+                            explanation: data.explanation || null,
+                            instructions: data.instructions || null,
+                            simplify: data.simplify || null,
+                            build_up: data.build_up || null,
+                            difficulty: data.difficulty || "Gemiddeld",
+                            audience: Array.isArray(data.audience)
+                                ? data.audience.filter((age: string) => audienceOptions.includes(age)) : [],
+                            board_layout: null,
+                        }).select("id, image_url").single();
+                        if (saveError || !saved?.id || saved.image_url !== imageUrl) {
+                            throw saveError || new Error("Opslagcontrole mislukt.");
+                        }
+                        results.push({ file, status: "toegevoegd", details: data.title + " · " + data.category_slug, id: saved.id });
+                    } catch (saveFailure) {
+                        const marker = "/storage/v1/object/public/exercise-previews/";
+                        const objectPath = imageUrl.split(marker)[1]?.split("?")[0];
+                        if (objectPath) {
+                            await supabase.storage.from("exercise-previews").remove([decodeURIComponent(objectPath)]);
+                        }
+                        throw saveFailure;
+                    }
+                }
+            } catch (error) {
+                results.push({
+                    file, status: "fout",
+                    details: error instanceof Error ? error.message : "Onbekende importfout.",
+                });
+            }
+            setBulkResults([...results]);
+        }
+        const added = results.filter((r) => r.status === "toegevoegd").length;
+        const skipped = results.filter((r) => r.status === "overgeslagen").length;
+        const failed = results.filter((r) => r.status === "fout").length;
+        setBulkProgress("Klaar: " + added + " toegevoegd, " + skipped + " overgeslagen, " + failed + " mislukt.");
+        setAnalyzing(false);
     }
 
     async function analyzePhoto() {
@@ -399,6 +486,27 @@ export default function NieuweOefeningenScreen() {
 
                 <View style={styles.importBox}>
                     <Text style={styles.label}>Foto importeren</Text>
+                    <Pressable style={styles.importButton} onPress={() => void bulkImportPhotos()} disabled={loading || analyzing}>
+                        <Text style={styles.buttonText}>Meerdere foto's importeren met AI (max. 20)</Text>
+                    </Pressable>
+                    <Text style={styles.helpText}>
+                        Selecteer maximaal 20 foto's. AI leest per foto de tekst, kiest een categorie en leeftijdsklassen,
+                        en slaat de originele foto op zonder een oefening na te tekenen.
+                    </Text>
+                    {!!bulkProgress && <Text style={styles.helpText}>{bulkProgress}</Text>}
+                    {bulkResults.map((result, index) => (
+                        <View key={index} style={{ marginTop: 6 }}>
+                            <Text style={styles.helpText}>
+                                {result.file}: {result.status} — {result.details}
+                            </Text>
+                            {result.id != null && (
+                                <Pressable onPress={() => router.push(`/exercise/${result.id}`)}>
+                                    <Text style={{ color: COLORS.primaryLight }}>Bekijk oefening #{result.id}</Text>
+                                </Pressable>
+                            )}
+                        </View>
+                    ))}
+
                     <Pressable
                         style={styles.importButton}
                         onPress={() => void importOriginalPhotoAutomatically()}
