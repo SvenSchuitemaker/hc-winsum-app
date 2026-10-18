@@ -62,7 +62,7 @@ export default function BoardItemOverlay({
         >
             <Pressable onPress={onSelect} hitSlop={12} style={[styles.itemInner, isText && { width: 72, height: 30 }]}> 
                 {item.type === "text" && <Text numberOfLines={2} style={{ color: "#FFFFFF", fontSize: 10, textAlign: "center", fontWeight: "700" }}>{item.text}</Text>}
-                {item.type === "player" && (
+                {(item.type === "player" || (["attacker", "defender", "trainer"].includes(item.type) && !!item.shirtColor)) && (
                     <View style={styles.jerseyWrap}>
                         <Svg width={22} height={22} viewBox="0 0 22 22">
                             <Path
@@ -88,7 +88,7 @@ export default function BoardItemOverlay({
                                 ["white", "orange", "grey"].includes(jerseyColor ?? "") && { color: "#111111" },
                             ]}
                         >
-                            {item.label ?? ""}
+                            {item.type === "player" ? (item.label ?? "") : (label ?? (item.type === "trainer" ? "T" : ""))}
                         </Text>
                     </View>
                 )}
@@ -106,19 +106,19 @@ export default function BoardItemOverlay({
                     />
                 )}
 
-                {item.type === "attacker" && (
+                {item.type === "attacker" && !item.shirtColor && (
                     <View style={styles.playerWrap}>
                         <Text style={styles.playerText}>{label ?? "A1"}</Text>
                     </View>
                 )}
 
-                {item.type === "defender" && (
+                {item.type === "defender" && !item.shirtColor && (
                     <View style={[styles.playerWrap, styles.defenderWrap]}>
                         <Text style={styles.playerText}>{label ?? "D1"}</Text>
                     </View>
                 )}
 
-                {item.type === "trainer" && (
+                {item.type === "trainer" && !item.shirtColor && (
                     <View style={[styles.playerWrap, styles.trainerWrap]}>
                         <Text style={[styles.playerText, styles.trainerText]}>{label ?? "T"}</Text>
                     </View>

@@ -241,6 +241,7 @@ export function createNewItem(
         return {
             id: makeId(),
             type: "trainer",
+            shirtColor: "grey",
             x,
             y,
         };
@@ -259,6 +260,7 @@ export function createNewItem(
         return {
             id: makeId(),
             type: "attacker",
+            shirtColor: "blue",
             x,
             y,
         };
@@ -268,6 +270,7 @@ export function createNewItem(
         return {
             id: makeId(),
             type: "defender",
+            shirtColor: "red",
             x,
             y,
         };
@@ -314,6 +317,7 @@ export function createAttackerCircleItems(
         return {
             id: makeId(),
             type: "attacker" as const,
+            shirtColor: "blue" as const,
             x: clamp(centerX + Math.cos(angle) * radius, 0.02, 0.98),
             y: clamp(centerY + Math.sin(angle) * radius, 0.02, 0.98),
         };
