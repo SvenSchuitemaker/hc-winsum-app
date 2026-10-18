@@ -133,6 +133,67 @@ export default function NieuweOefeningenScreen() {
         }
     }
 
+    async function importOriginalPhotoAutomatically() {
+        if (!isSuperAdmin || !user?.id || !supabase) {
+            setImportError("Log in als hoofdbeheerder om een oefening te importeren.");
+            return;
+        }
+        let uploadedUrl: string | null = null;
+        try {
+            setAnalyzing(true);
+            setImportError("");
+            setFormSuccess("");
+            const photo = await selectExercisePhoto();
+            if (!photo) return;
+
+            // The image is sent to the AI only for text recognition, NEVER redrawn.
+            const { data, error } = await supabase.functions.invoke("read-exercise-text", {
+                body: { mimeType: photo.mimeType, base64: photo.base64 },
+            });
+            if (error || !data || data.error || typeof data.title !== "string" ||
+                !categories.some((category) => category.slug === data.category_slug)) {
+                throw new Error(data?.error || "De tekst of categorie kon niet worden herkend.");
+            }
+
+            const { data: duplicate, error: duplicateError } = await supabase.from("exercises")
+                .select("id").eq("category_slug", data.category_slug).ilike("title", data.title).limit(1);
+            if (duplicateError) throw duplicateError;
+            if (duplicate?.length) {
+                throw new Error("Deze oefening bestaat al (ID " + duplicate[0].id + "). Niet dubbel opgeslagen.");
+            }
+
+            uploadedUrl = await uploadExercisePhoto(photo, user.id);
+            const { data: saved, error: saveError } = await supabase.from("exercises").insert({
+                title: data.title,
+                category_slug: data.category_slug,
+                image_url: uploadedUrl,
+                subtitle: data.subtitle || null,
+                explanation: data.explanation || null,
+                instructions: data.instructions || null,
+                simplify: data.simplify || null,
+                build_up: data.build_up || null,
+                difficulty: data.difficulty || "Gemiddeld",
+                audience: Array.isArray(data.audience) ? data.audience.filter((age: string) => audienceOptions.includes(age)) : [],
+                board_layout: null,
+            }).select("id, image_url").single();
+            if (saveError || !saved?.id || saved.image_url !== uploadedUrl) {
+                throw saveError || new Error("Opslag kon niet worden bevestigd.");
+            }
+
+            // Check that the original uploaded image is accessible.
+            const photoCheck = await fetch(uploadedUrl, { method: "GET" });
+            if (!photoCheck.ok) {
+                setFormSuccess("Oefening #" + saved.id + " opgeslagen, maar controle van de originele foto mislukte.");
+            } else {
+                setFormSuccess("Oefening #" + saved.id + " toegevoegd met de originele foto, zonder AI-tekening.");
+            }
+        } catch (error) {
+            setImportError(error instanceof Error ? error.message : "Automatisch importeren mislukt.");
+        } finally {
+            setAnalyzing(false);
+        }
+    }
+
     async function analyzePhoto() {
         if (!importPhoto) return;
         try {
@@ -338,6 +399,20 @@ export default function NieuweOefeningenScreen() {
 
                 <View style={styles.importBox}>
                     <Text style={styles.label}>Foto importeren</Text>
+                    <Pressable
+                        style={styles.importButton}
+                        onPress={() => void importOriginalPhotoAutomatically()}
+                        disabled={loading || analyzing}
+                    >
+                        {analyzing
+                            ? <ActivityIndicator color={COLORS.text} />
+                            : <Text style={styles.buttonText}>AI: foto herkennen en direct opslaan</Text>}
+                    </Pressable>
+                    <Text style={styles.helpText}>
+                        Kies één foto: AI leest de oefening, kiest categorie en leeftijden,
+                        en bewaart uitsluitend de originele afbeelding. Het tekenbord blijft leeg.
+                    </Text>
+
                     <Text style={styles.helpText}>Kies een bestaande hockeyoefening uit je galerij. Gebruik de originele foto of laat AI een bewerkbaar bord voorstellen.</Text>
                     <View style={styles.importModes}>
                         <Pressable style={[styles.modeButton, importMode === "photo" && styles.modeSelected]} onPress={() => setImportMode("photo")}>
