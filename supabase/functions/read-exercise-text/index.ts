@@ -7,6 +7,10 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 const ageGroups = new Set(["JO8","JO10","JO12","JO14","JO16","JO18","MO8","MO10","MO12","MO14","MO16","MO18","Senioren"]);
 const levels = new Set(["Makkelijk","Gemiddeld","Moeilijk"]);
 const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0,max) : "";
+// A numbered generic label is a source reference, not a useful trainer-facing title.
+const genericTitle = (value: string) =>
+  /^(?:(?:vereenvoudigde?|basis|standaard|algemene?)\s+)?(?:pass?oefening|passenoefening|hockeyoefening|trainingsoefening|oefening|training|spelvorm|dribbeloefening)(?:\s*(?:(?:nummer|nr\.?|#)\s*)?\d+)?$/i.test(value.trim());
+
 Deno.serve(async request => {
   if (request.method === "OPTIONS") return response({});
   if (request.method !== "POST") return response({error:"Only POST is supported"},405);
@@ -35,7 +39,7 @@ Deno.serve(async request => {
       method:"POST",headers:{"Authorization":`Bearer ${key}`,"Content-Type":"application/json"},
       body:JSON.stringify({model:"gpt-4.1-mini",temperature:0,response_format:{type:"json_object"},
         messages:[
-          {role:"system",content:`Lees de hockeyoefening rechtstreeks van de foto. Lever JSON met exact deze velden: title,subtitle,explanation,instructions,simplify,build_up,difficulty,audience,category_slug. Gebruik uitsluitend aantoonbare tekst of nauwkeurig afgeleide aanwijzingen, nooit een verzonnen oefening. Gebruik een bestaande category_slug uit ${JSON.stringify(categoryList)}. difficulty: Makkelijk/Gemiddeld/Moeilijk. audience: kies alleen toepasselijke codes uit JO8,JO10,JO12,JO14,JO16,JO18,MO8,MO10,MO12,MO14,MO16,MO18,Senioren. Voeg JO en MO voor dezelfde leeftijd toe bij gelijke geschiktheid. Geef in instructions de organisatie en stappen uit de afbeelding, in explanation het doel en verloop. Geen tekeninstructies of afbeeldingsdata produceren.`},
+          {role:"system",content:`Lees de hockeyoefening rechtstreeks van de foto. Lever JSON met exact deze velden: title,subtitle,explanation,instructions,simplify,build_up,difficulty,audience,category_slug. Gebruik uitsluitend aantoonbare tekst of nauwkeurig afgeleide aanwijzingen, nooit een verzonnen oefening. Maak een SPECIFIEKE, betekenisvolle Nederlandse titel van circa 4-9 woorden die deze oefening herkenbaar onderscheidt van andere oefeningen. Benoem waar zichtbaar de technische actie (bijvoorbeeld passen, aannemen, vrijlopen, afronden), het patroon of de spelvorm (bijvoorbeeld driehoek, kom, 3-tegen-2, doorschuiven) en eventueel het trainingsdoel. Gebruik alleen kenmerken die werkelijk uit de foto of begeleidende tekst blijken. Een bij de afbeelding gedrukte titel als "Vereenvoudigde passoefening 9" is een bronlabel en mag NIET letterlijk als titel worden overgenomen. Vermijd generieke titels zoals "Passoefening", "Hockeyoefening 3", "Training 9" of "Vereenvoudigde passoefening 9"; vermijd losstaande volg- of oefeningnummers en marketingtaal. Verzamel eerst de concrete kenmerken en schrijf daarna één korte, natuurlijke titel; verzin nooit een opstelling als deze niet zichtbaar is. Gebruik een bestaande category_slug uit ${JSON.stringify(categoryList)}. difficulty: Makkelijk/Gemiddeld/Moeilijk. audience: kies alleen toepasselijke codes uit JO8,JO10,JO12,JO14,JO16,JO18,MO8,MO10,MO12,MO14,MO16,MO18,Senioren. Voeg JO en MO voor dezelfde leeftijd toe bij gelijke geschiktheid. Geef in instructions de organisatie en stappen uit de afbeelding, in explanation het doel en verloop. Geen tekeninstructies of afbeeldingsdata produceren.`},
           {role:"user",content:[{type:"text",text:"Lees alle relevante tekst van deze hockeyoefening en classificeer."},
             {type:"image_url",image_url:{url:`data:${mime};base64,${base64}`,detail:"high"}}]},
         ]}),
@@ -45,9 +49,40 @@ Deno.serve(async request => {
     const raw = result?.choices?.[0]?.message?.content;
     if(typeof raw !== "string") return response({error:"AI gaf geen tekst terug."},502);
     const parsed = JSON.parse(raw);
-    const title=text(parsed.title,160);
+    let title=text(parsed.title,160);
     const slug=text(parsed.category_slug,120);
     if(!title || !categoryList.some(c=>c.slug===slug)) return response({error:"Titel of categorie kon niet betrouwbaar worden bepaald."},422);
+    if (genericTitle(title)) {
+      // Retry a title only, grounded in the original photo analysis. Don't change description fields.
+      const revised = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4.1-mini", temperature: 0.2,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: "Je schrijft uitsluitend één herkenbare, concrete titel voor een hockeyoefening als JSON {title:string}. Gebruik 4 tot 9 Nederlandse woorden. Noem de werkelijke technische actie en zichtbare oefenvorm. Kopieer geen generieke bronlabels, volg- of oefeningnummers. Verzin geen details. Gebruik alleen de gegeven beschrijving." },
+            { role: "user", content: JSON.stringify({
+              generic_title: title,
+              explanation: text(parsed.explanation,1800),
+              instructions: text(parsed.instructions,1800),
+              subtitle: text(parsed.subtitle,250),
+            }) },
+          ],
+        }),
+      });
+      if (revised.ok) {
+        const result = await revised.json();
+        try {
+          const value = JSON.parse(result?.choices?.[0]?.message?.content ?? "{}");
+          const candidate = text(value.title,160);
+          if (candidate && !genericTitle(candidate)) title = candidate;
+        } catch { /* Keep the initial result for the final quality check. */ }
+      }
+      if (genericTitle(title)) {
+        return response({error:"AI kon geen onderscheidende titel bepalen. Voeg meer informatie toe aan de foto en probeer opnieuw."},422);
+      }
+    }
     const audience = Array.isArray(parsed.audience)
       ? [...new Set(parsed.audience.filter((v:unknown)=>typeof v==="string" && ageGroups.has(v)))] : [];
     return response({
