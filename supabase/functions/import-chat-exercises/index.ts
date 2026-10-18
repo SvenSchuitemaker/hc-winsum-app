@@ -25,9 +25,14 @@ function equalSecret(given: string, expected: string): boolean {
   for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
   return diff === 0;
 }
-function decodeImage(raw: unknown): { bytes: Uint8Array; mime: string; extension: string } {
+async function decodeImage(raw: unknown): Promise<{ bytes: Uint8Array; mime: string; extension: string }> {
   if (!raw || typeof raw !== "object") throw new Error("image is required, with mimeType and base64.");
   const image = raw as Record<string, unknown>;
+  // Reject AI-generated board images: only the exact user-uploaded source photo is accepted.
+  // The caller must preserve the source bytes and supply their SHA-256 digest.
+  if (image.source !== "original_upload") throw new Error("Only original uploaded photos are accepted (source: original_upload).");
+  const expectedSha256 = String(image.sha256 || "").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error("The original image SHA-256 checksum is required.");
   const mime = String(image.mimeType || "");
   if (!imageTypes[mime]) throw new Error("Image must be JPEG, PNG or WebP.");
   const base64 = String(image.base64 || "").replace(/^data:image\/(?:jpeg|png|webp);base64,/, "");
@@ -45,9 +50,12 @@ function decodeImage(raw: unknown): { bytes: Uint8Array; mime: string; extension
   if (!(mime === "image/jpeg" && jpeg || mime === "image/png" && png || mime === "image/webp" && webp)) {
     throw new Error("Image file signature does not match its MIME type.");
   }
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const actualSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  if (actualSha256 !== expectedSha256) throw new Error("Image bytes do not match the uploaded original checksum.");
   return { bytes, mime, extension: imageTypes[mime] };
 }
-function normalize(raw: unknown) {
+async function normalize(raw: unknown) {
   if (!raw || typeof raw !== "object") throw new Error("Exercise must be an object.");
   const item = raw as Record<string, unknown>;
   const title = safeString(item.title, 160);
@@ -59,7 +67,7 @@ function normalize(raw: unknown) {
       !item.audience.every((v) => typeof v === "string" && audiences.has(v))) {
     throw new Error("audience must contain valid age groups.");
   }
-  const image = decodeImage(item.image);
+  const image = await decodeImage(item.image);
   return {
     title, category_slug, difficulty,
     audience: [...new Set(item.audience as string[])],
@@ -106,9 +114,9 @@ Deno.serve(async (request) => {
   const categorySlugs = new Set(categories.map(c => String(c.slug)));
   const results: Array<Record<string, unknown>> = [];
   for (let index = 0; index < value.exercises.length; index++) {
-    let item: ReturnType<typeof normalize>;
+    let item: Awaited<ReturnType<typeof normalize>>;
     try {
-      item = normalize(value.exercises[index]);
+      item = await normalize(value.exercises[index]);
       if (!categorySlugs.has(item.category_slug)) throw new Error("Unknown category_slug; fetch existing categories first.");
     } catch (e) {
       results.push({ index, status: "invalid", error: String((e as Error).message) });
