@@ -1,6 +1,39 @@
 // Deploy with: supabase functions deploy analyze-exercise-photo
-// Configure the secret OPENAI_API_KEY in Supabase (never in the client).
+// Configure the secret GEMINI_API_KEY in Supabase (never in the client).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+async function geminiFetch(_url: string, init: RequestInit): Promise<Response> {
+  const body = JSON.parse(String(init.body || "{}"));
+  const key = Deno.env.get("GEMINI_API_KEY");
+  if (!key) return new Response(JSON.stringify({error:{code:"missing_api_key"}}),{status:503});
+  const parts: Array<Record<string, unknown>> = [];
+  const instructions: string[] = [];
+  for (const msg of body.messages ?? []) {
+    if (msg.role === "system") { instructions.push(String(msg.content)); continue; }
+    if (typeof msg.content === "string") { parts.push({text:msg.content}); continue; }
+    for (const p of msg.content ?? []) {
+      if (p.type === "text") parts.push({text:p.text});
+      if (p.type === "image_url") {
+        const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(p.image_url?.url || ""));
+        if (match) parts.push({inlineData:{mimeType:match[1],data:match[2]}});
+      }
+    }
+  }
+  const model=Deno.env.get("GEMINI_EXERCISE_VISION_MODEL") || "gemini-3.8-flash";
+  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+    method:"POST",headers:{"x-goog-api-key":key,"Content-Type":"application/json"},
+    body:JSON.stringify({
+      systemInstruction:{parts:[{text:instructions.join("\n\n")}]},
+      contents:[{role:"user",parts}],
+      generationConfig:{responseMimeType:"application/json",temperature:0.1}
+    })
+  });
+  if (!response.ok) return response;
+  const result=await response.json();
+  const content=(result.candidates?.[0]?.content?.parts ?? []).map((p:{text?:string})=>p.text || "").join("");
+  if (!content) return new Response(JSON.stringify({error:{code:"empty_response"}}),{status:502});
+  return new Response(JSON.stringify({choices:[{message:{content}}]}),{headers:{"Content-Type":"application/json"}});
+}
+
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -194,7 +227,7 @@ function normalizedItems(items: unknown, calibration: FieldCalibration) {
 // normal coordinate/label alignment. A list entry is one physical object,
 // including adjacent/overlapping shirts. No expected team sizes are assumed.
 async function analyzeObjectInventory(key: string, model: string, mimeType: string, base64: string): Promise<unknown[] | null> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -218,7 +251,7 @@ async function analyzeObjectInventory(key: string, model: string, mimeType: stri
 
 // A second, focused vision pass avoids confusing exercise arrows with field markings.
 async function analyzeArrows(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -251,7 +284,7 @@ async function auditMissingArrowheads(
   known: Array<{ x: number; y: number; x2: number; y2: number }>,
 ): Promise<unknown[]> {
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -286,7 +319,7 @@ async function analyzeActorConnections(
 ): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string; tail: { x: number; y: number }; tip: { x: number; y: number } }>> {
   if (!actors.length || !lines.length) return [];
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -320,7 +353,7 @@ async function verifyJerseyNumbers(
 ): Promise<Array<{ id: number; number: string }>> {
   if (!actors.length) return [];
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -352,7 +385,7 @@ async function verifyArrowEndpoints(key: string, model: string, mimeType: string
   const candidates = arrows.slice(0, 20).map((arrow, i) => ({
     id: i, x: arrow.x, y: arrow.y, x2: arrow.x2, y2: arrow.y2,
   }));
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -380,7 +413,7 @@ async function verifyArrowEndpoints(key: string, model: string, mimeType: string
  * A failed audit leaves the original reconstruction intact.
  */
 async function analyzeJerseyLabels(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -892,12 +925,12 @@ Deno.serve(async (request) => {
     if (!token) return json({ error: "Authentication required." }, 401);
     const url = Deno.env.get("SUPABASE_URL");
     const anon = Deno.env.get("SUPABASE_ANON_KEY");
-    const key = Deno.env.get("OPENAI_API_KEY");
+    const key = Deno.env.get("GEMINI_API_KEY");
     // Report missing variable *names* only; never expose secret values.
     const missing = [
       !url ? "SUPABASE_URL" : null,
       !anon ? "SUPABASE_ANON_KEY" : null,
-      !key ? "OPENAI_API_KEY" : null,
+      !key ? "GEMINI_API_KEY" : null,
     ].filter(Boolean);
     if (missing.length) return json({ error: `AI-import is niet geconfigureerd. Ontbrekende Supabase-instelling(en): ${missing.join(", ")}.` }, 503);
     const supabase = createClient(url, anon, { global: { headers: { Authorization: `Bearer ${token}` } } });
@@ -913,8 +946,8 @@ Deno.serve(async (request) => {
       return json({ error: "Choose a JPEG, PNG or WebP image smaller than 5 MB." }, 400);
     }
 
-    const visionModel = Deno.env.get("OPENAI_EXERCISE_VISION_MODEL") || "gpt-4o";
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const visionModel = Deno.env.get("GEMINI_EXERCISE_VISION_MODEL") || "gemini-3.8-flash";
+    const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -950,15 +983,15 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }
       let message = "AI-analyse mislukt bij de AI-dienst. Probeer het later opnieuw.";
       if (response.status === 401 || providerCode === "invalid_api_key") {
-        message = "De OpenAI API-sleutel is ongeldig. Controleer OPENAI_API_KEY in Supabase Secrets.";
+        message = "De Gemini API-sleutel is ongeldig. Controleer GEMINI_API_KEY in Supabase Secrets.";
       } else if (providerCode === "insufficient_quota") {
-        message = "Het OpenAI API-account heeft onvoldoende API-tegoed. Controleer Billing en Usage op platform.openai.com.";
+        message = "Het Gemini API-account heeft onvoldoende API-tegoed. Controleer Billing en Usage op aistudio.google.com.";
       } else if (response.status === 429) {
-        message = "OpenAI heeft een gebruikslimiet bereikt. Controleer API-tegoed en limieten of probeer later opnieuw.";
+        message = "Gemini heeft een gebruikslimiet bereikt. Controleer API-tegoed en limieten of probeer later opnieuw.";
       } else if (response.status === 403) {
-        message = "Het OpenAI-project heeft geen toegang tot deze AI-aanvraag. Controleer de projectrechten.";
+        message = "Het Gemini-project heeft geen toegang tot deze AI-aanvraag. Controleer de projectrechten.";
       } else if (response.status === 400 || response.status === 404) {
-        message = "OpenAI accepteert deze afbeelding of dit model niet. Controleer het AI-model en probeer een andere foto.";
+        message = "Gemini accepteert deze afbeelding of dit model niet. Controleer het AI-model en probeer een andere foto.";
       }
       return json({ error: message, provider_status: response.status, provider_code: providerCode || null }, 502);
     }
