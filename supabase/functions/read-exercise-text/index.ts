@@ -1,5 +1,38 @@
 // AI text-only recognition for original-photo import. No board is generated.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+async function geminiFetch(_url: string, init: RequestInit): Promise<Response> {
+  const body = JSON.parse(String(init.body || "{}"));
+  const key = Deno.env.get("GEMINI_API_KEY");
+  if (!key) return new Response(JSON.stringify({error:{code:"missing_api_key"}}),{status:503});
+  const parts: Array<Record<string, unknown>> = [];
+  const instructions: string[] = [];
+  for (const msg of body.messages ?? []) {
+    if (msg.role === "system") { instructions.push(String(msg.content)); continue; }
+    if (typeof msg.content === "string") { parts.push({text:msg.content}); continue; }
+    for (const p of msg.content ?? []) {
+      if (p.type === "text") parts.push({text:p.text});
+      if (p.type === "image_url") {
+        const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(p.image_url?.url || ""));
+        if (match) parts.push({inlineData:{mimeType:match[1],data:match[2]}});
+      }
+    }
+  }
+  const model=Deno.env.get("GEMINI_EXERCISE_VISION_MODEL") || "gemini-3.8-flash";
+  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+    method:"POST",headers:{"x-goog-api-key":key,"Content-Type":"application/json"},
+    body:JSON.stringify({
+      systemInstruction:{parts:[{text:instructions.join("\n\n")}]},
+      contents:[{role:"user",parts}],
+      generationConfig:{responseMimeType:"application/json",temperature:0.1}
+    })
+  });
+  if (!response.ok) return response;
+  const result=await response.json();
+  const content=(result.candidates?.[0]?.content?.parts ?? []).map((p:{text?:string})=>p.text || "").join("");
+  if (!content) return new Response(JSON.stringify({error:{code:"empty_response"}}),{status:502});
+  return new Response(JSON.stringify({choices:[{message:{content}}]}),{headers:{"Content-Type":"application/json"}});
+}
+
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, apikey, x-client-info, content-type" },
@@ -14,7 +47,7 @@ const genericTitle = (value: string) =>
 Deno.serve(async request => {
   if (request.method === "OPTIONS") return response({});
   if (request.method !== "POST") return response({error:"Only POST is supported"},405);
-  const key = Deno.env.get("OPENAI_API_KEY");
+  const key = Deno.env.get("GEMINI_API_KEY");
   const url = Deno.env.get("SUPABASE_URL");
   const anon = Deno.env.get("SUPABASE_ANON_KEY");
   if (!key || !url || !anon) return response({error:"AI-import is niet geconfigureerd"},503);
@@ -35,7 +68,7 @@ Deno.serve(async request => {
   if(categoryError || !categories?.length) return response({error:"Geen categorieën beschikbaar."},500);
   const categoryList = categories.map(c=>({slug:String(c.slug),title:String(c.title)}));
   try {
-    const ai = await fetch("https://api.openai.com/v1/chat/completions",{
+    const ai = await geminiFetch("https://api.openai.com/v1/chat/completions",{
       method:"POST",headers:{"Authorization":`Bearer ${key}`,"Content-Type":"application/json"},
       body:JSON.stringify({model:"gpt-4.1-mini",temperature:0,response_format:{type:"json_object"},
         messages:[
@@ -54,7 +87,7 @@ Deno.serve(async request => {
     if(!title || !categoryList.some(c=>c.slug===slug)) return response({error:"Titel of categorie kon niet betrouwbaar worden bepaald."},422);
     if (genericTitle(title)) {
       // Retry a title only, grounded in the original photo analysis. Don't change description fields.
-      const revised = await fetch("https://api.openai.com/v1/chat/completions", {
+      const revised = await geminiFetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -89,7 +122,7 @@ Deno.serve(async request => {
     const missing = requiredText.filter(field => !text(parsed[field],4000));
     if (missing.length) {
       try {
-        const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+        const completion = await geminiFetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
           body: JSON.stringify({

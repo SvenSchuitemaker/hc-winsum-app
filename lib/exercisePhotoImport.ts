@@ -96,7 +96,7 @@ export async function analyzeExercisePhoto(photo: SelectedExercisePhoto): Promis
         body: { mimeType: photo.mimeType, base64: photo.base64, detectedCones, detectedPlayers },
     });
     if (error) {
-        let message = "AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed en OPENAI_API_KEY is ingesteld.";
+        let message = "AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed en GEMINI_API_KEY is ingesteld.";
         const response = (error as { context?: Response }).context;
         if (response && typeof response.json === "function") {
             try {
