@@ -59,10 +59,10 @@ In **Nieuwe oefening toevoegen** (super admin), use **Foto kiezen** and choose e
 
 **AI setup (required before first use)**
 
-The public app must never contain an OpenAI API key. The Supabase function uses the server-side secret `OPENAI_API_KEY`, with an authenticated `super_admin` authorization check.
+The public app must never contain an Gemini API key. The Supabase function uses the server-side secret `GEMINI_API_KEY`, with an authenticated `super_admin` authorization check.
 
-1. Obtain an OpenAI API key with available API credits (ChatGPT subscription does not include API credits). AI analysis incurs usage charges.
-2. Add `OPENAI_API_KEY` as an Edge Function secret in the **HC Winsum** Supabase project (via the Supabase dashboard, or `supabase secrets set OPENAI_API_KEY=...` in a secure terminal). Do not add secrets to GitHub or commit them.
+1. Obtain an Gemini API key with available API credits (ChatGPT subscription does not include API credits). AI analysis incurs usage charges.
+2. Add `GEMINI_API_KEY` as an Edge Function secret in the **HC Winsum** Supabase project (via the Supabase dashboard, or `supabase secrets set GEMINI_API_KEY=...` in a secure terminal). Do not add secrets to GitHub or commit them.
 3. Deploy the new function from this repository using `supabase functions deploy analyze-exercise-photo --project-ref shllbltitjogepjeyxdr` after logging in with the Supabase CLI.
 4. Deploy the Expo app via the normal GitHub Pages workflow after merging the PR.
 
