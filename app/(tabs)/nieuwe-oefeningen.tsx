@@ -454,9 +454,9 @@ export default function NieuweOefeningenScreen() {
             if (insertError) throw insertError;
 
             let previewFailed = false;
-            // A photo upload always keeps its original image_url, even when AI also provides an editable board.
-            // A board preview is only created for exercises drawn manually without an uploaded photo.
-            if (hasBoardItems && !importPhoto && insertedExercise?.id && boardPreviewRef.current) {
+            // For AI tracing and manual drawings, the captured editable canvas is the saved image.
+            // Preserve the original uploaded photo as a fallback if preview generation fails.
+            if (hasBoardItems && insertedExercise?.id && boardPreviewRef.current) {
                 try {
                     const previewUrl = await uploadExerciseBoardPreview({
                         exerciseId: insertedExercise.id,
