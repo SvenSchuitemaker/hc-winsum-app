@@ -242,7 +242,7 @@ function promotePrintedPlayers(items: Array<Record<string, unknown>>): Array<Rec
 }
 
 // One bounded specialist pass, also for partially detected markers.
-async function recoverPrintedCones(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
+async function recoverPrintedCones(key: string, model: string, mimeType: string, base64: string): Promise<{cones: Record<string, unknown>[]; numberedPlayers: Record<string, unknown>[]}> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 11000);
   try {
@@ -254,19 +254,19 @@ async function recoverPrintedCones(key: string, model: string, mimeType: string,
         signal: controller.signal,
         body: JSON.stringify({
           contents: [{ role: "user", parts: [
-            { text: "Look ONLY inside the printed hockey exercise field. Find every physically depicted training cone or marker: tiny grey/black triangles, colored traffic cones, flat discs, pylons, outlined cones and marker icons, even if next to player numbers. Return JSON {cones:[{x:0.5,y:0.5}]} with the true centre in NORMALIZED FULL PHOTO coordinates (0..1). Do not count player shirts, people, player numbers, arrows, field lines, field markings, text, or goals. Never invent missing cones or complete a pattern. If there are none, return cones:[]." },
+            { text: "Look ONLY inside the printed hockey exercise field. Find every physically depicted training cone or marker: tiny grey/black triangles, colored traffic cones, flat discs, pylons, outlined cones and marker icons, even if next to player numbers. Also identify printed player symbols marked with digits such as 1., 2. where the number VISIBLY designates a person (not a step, a cone, or a distance). Return JSON {cones:[{x:0.5,y:0.5}],numberedPlayers:[{x:0.3,y:0.4,label:"1"}]} with real visual centers in NORMALIZED FULL PHOTO coordinates (0..1). Include only independently visible numbered PLAYER pictograms, whether the number is inside or directly adjacent to the symbol. If the digit is merely step text or ambiguous, do not include it. Do not count player shirts, people, player numbers, arrows, field lines, field markings, text, or goals. Never invent missing cones or complete a pattern. If no markers/numbered player symbols are visible, return cones:[],numberedPlayers:[]." },
             { inlineData: { mimeType, data: base64 } },
           ] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 512 },
+          generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 1024 },
         }),
       },
     );
-    if (!response.ok) return [];
+    if (!response.ok) return { cones: [], numberedPlayers: [] };
     const result = await response.json();
     const content = (result.candidates?.[0]?.content?.parts ?? [])
       .map((part: { text?: string }) => part.text ?? "").join("");
     const parsed = JSON.parse(content || "{}");
-    if (!Array.isArray(parsed.cones)) return [];
+    if (!Array.isArray(parsed.cones)) return { cones: [], numberedPlayers: [] };
     const cones: Array<{ type: "cone"; x: number; y: number }> = [];
     for (const raw of parsed.cones.slice(0, 60)) {
       const x = Number(raw?.x), y = Number(raw?.y);
@@ -274,9 +274,17 @@ async function recoverPrintedCones(key: string, model: string, mimeType: string,
       if (cones.some((previous) => Math.hypot(previous.x - x, previous.y - y) < 0.012)) continue;
       cones.push({ type: "cone", x, y });
     }
-    return cones;
+    const numberedPlayers: Record<string, unknown>[] = [];
+    for (const raw of (Array.isArray(parsed.numberedPlayers) ? parsed.numberedPlayers : []).slice(0, 50)) {
+      const label = /^([1-9][0-9]?)\\.?$/.exec(String(raw?.label ?? "").trim());
+      const x = Number(raw?.x), y = Number(raw?.y);
+      if (!label || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
+      if (numberedPlayers.some(previous => previous.label === label[1] && Math.hypot(Number(previous.x)-x,Number(previous.y)-y) < 0.025)) continue;
+      numberedPlayers.push({type:"player",label:label[1],shirtColor:"black",x,y});
+    }
+    return { cones, numberedPlayers };
   } catch {
-    return [];
+    return { cones: [], numberedPlayers: [] };
   } finally {
     clearTimeout(timeout);
   }
@@ -1137,27 +1145,55 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       .map(normalizePrintedEquipment).filter((item) => item !== null) as Record<string, unknown>[];
     const promoted = promotePrintedPlayers(sourceVisualItems as Record<string, unknown>[]);
     sourceVisualItems.splice(0, sourceVisualItems.length, ...promoted);
-    // The specialist cone pass complements partial inventories too. Its output
-    // is matched in SOURCE coordinates before the common field transform.
-    const hasRecognizedCones = sourceVisualItems.some((item) =>
-      (item as Record<string, unknown>).type === "cone");
-    if (hasRecognizedCones ||
-        !Array.isArray(body?.detectedCones) || body.detectedCones.length === 0) {
-      const recoveredCones = await recoverPrintedCones(key!, visionModel, mimeType, base64);
-      const existing = sourceVisualItems.filter(raw => (raw as Record<string, unknown>).type === "cone") as Record<string, unknown>[];
-      for (const recovered of recoveredCones) {
-        const candidate = recovered as Record<string, unknown>;
-        // Specialized recognition must not override trusted primary positions.
-        if (existing.some(cone => Math.hypot(Number(cone.x)-Number(candidate.x), Number(cone.y)-Number(candidate.y)) < 0.035)) continue;
-        // Also avoid treating existing player locations as faint cone symbols.
-        if (sourceVisualItems.some(raw => {
-          const obj = raw as Record<string, unknown>;
-          return ["player","attacker","defender","trainer"].includes(String(obj.type)) &&
-            Math.hypot(Number(obj.x)-Number(candidate.x), Number(obj.y)-Number(candidate.y)) < 0.025;
-        })) continue;
-        sourceVisualItems.push(candidate);
-        existing.push(candidate);
+    // One targeted bounded scan cross-checks both printed player symbols and
+    // cones, even if Gemini's primary inventory found only some markers.
+    const specialist = await recoverPrintedCones(key!, visionModel, mimeType, base64);
+    const sourceDistance = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      Math.hypot(Number(a.x)-Number(b.x), Number(a.y)-Number(b.y));
+    const sourceObjects = sourceVisualItems as Record<string, unknown>[];
+    for (const candidate of specialist.numberedPlayers) {
+      const nearby = sourceObjects.filter(obj => sourceDistance(obj, candidate) < 0.065);
+      // A specialist player finding needs an independent matching numbered
+      // annotation or existing player; never add one just to complete a diagram.
+      const number = String(candidate.label);
+      const matchingText = nearby.filter(obj => obj.type === "text" &&
+        /^([1-9][0-9]?)\\.?$/.exec(String(obj.text ?? "").trim())?.[1] === number);
+      const already = nearby.find(obj => obj.type === "player" &&
+        (String(obj.label ?? "").trim() === number || !String(obj.label ?? "").trim()) &&
+        sourceDistance(obj,candidate) < 0.038);
+      if (already) {
+        if (!String(already.label ?? "").trim()) already.label = number;
+        for (const label of matchingText) sourceObjects.splice(sourceObjects.indexOf(label), 1);
+      } else if (matchingText.length === 1 &&
+          !nearby.some(obj => ["cone","trainer","attacker","defender"].includes(String(obj.type)) &&
+            sourceDistance(obj,candidate) < 0.025)) {
+        // Specialist coordinates point at the visible symbol, not at the text.
+        sourceObjects.splice(sourceObjects.indexOf(matchingText[0]), 1);
+        sourceObjects.push(candidate);
       }
+    }
+    // Do NOT replace the cone inventory with the red pixel mask: that mask
+    // cannot see black, grey or flat markers in scanned coaching books.
+    const primaryCones = sourceObjects.filter(obj => obj.type === "cone");
+    const usedPrimary = new Set<Record<string, unknown>>();
+    for (const candidate of specialist.cones) {
+      const ranked = primaryCones.filter(obj => !usedPrimary.has(obj))
+        .map(obj => ({obj,d:sourceDistance(obj,candidate)})).sort((a,b)=>a.d-b.d);
+      const best = ranked[0];
+      // Reconcile matching detections conservatively. The specialized reading
+      // can correct small offsets only with a unique local correspondence.
+      if (best && best.d < 0.075 && (!ranked[1] || ranked[1].d-best.d > 0.023)) {
+        usedPrimary.add(best.obj);
+        if (best.d <= 0.05) { best.obj.x = candidate.x; best.obj.y = candidate.y; }
+        continue;
+      }
+      if (primaryCones.some(obj => sourceDistance(obj,candidate) < 0.075) ||
+          sourceObjects.some(obj => ["player","trainer","attacker","defender"].includes(String(obj.type)) &&
+            sourceDistance(obj,candidate) < 0.025) ||
+          sourceObjects.some(obj => obj.type === "cone" && sourceDistance(obj,candidate) < 0.025)) continue;
+      sourceObjects.push(candidate);
+      primaryCones.push(candidate);
+      usedPrimary.add(candidate);
     }
     // "Steunspeler" is a caption beside a blue shirt, NOT a separate board
     // object. Shirt numbers remain on the shirt. Keep unrelated drill text.
@@ -1466,18 +1502,21 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }
       return updated;
     };
-    // Red cones are small, high-contrast symbols. When the pixel detector
-    // returns a credible set, use its actual measured positions and COUNT,
-    // not an AI-inferred cone formation. Never mix fake AI cones into that set.
-    const conePixelsCredible = coneAnchors.length >= 3 && coneAnchors.length <= 60 &&
-      coneAnchors.every((p, i) => coneAnchors.every((q, j) => i === j ||
-        Math.hypot(p.x - q.x, p.y - q.y) > 0.008));
-    const reliablePhysical = conePixelsCredible
-      ? [
-          ...physicalSource.filter((obj) => (obj as Record<string, unknown>).type !== "cone"),
-          ...coneAnchors.map((p) => ({ type: "cone", x: p.x, y: p.y })),
-        ]
-      : physicalSource;
+    // Red pixel anchors can supplement the original inventory, not replace it.
+    // A partial color mask must never erase low-contrast printed pylons.
+    const conePixelsCredible = coneAnchors.length >= 1 && coneAnchors.length <= 60;
+    const reliablePhysical = [...physicalSource];
+    if (conePixelsCredible) {
+      for (const pixel of coneAnchors) {
+        const candidate = { type: "cone", x: pixel.x, y: pixel.y };
+        if (reliablePhysical.some(raw => {
+          const item = raw as Record<string, unknown>;
+          return (item.type === "cone" || item.type === "player") &&
+            Math.hypot(Number(item.x)-pixel.x,Number(item.y)-pixel.y) < 0.035;
+        })) continue;
+        reliablePhysical.push(candidate);
+      }
+    }
     // The color-based shirt detector is advisory. Only replace a shirt center
     // when the same-color inventory and detected pixel count agree.
     const pixelAnchored = anchorObjects(reliablePhysical, "player", playerAnchors);
