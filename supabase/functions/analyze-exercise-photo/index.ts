@@ -206,6 +206,49 @@ function normalizePrintedEquipment(raw: unknown): Record<string, unknown> | null
   return { ...entry };
 }
 
+
+// Targeted fallback for low-contrast printed cones. This only runs if the
+// primary inventory found none; the deadline avoids reintroducing HTTP 504.
+async function recoverPrintedCones(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 11000);
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [
+            { text: "Look ONLY inside the printed hockey exercise field. Find every physically depicted training cone or marker: tiny grey/black triangles, flat discs, pylons, outlined cones and marker icons, even if next to player numbers. Return JSON {cones:[{x:0.5,y:0.5}]} with the true centre in NORMALIZED FULL PHOTO coordinates (0..1). Do not count player shirts, people, player numbers, arrows, field lines, field markings, text, or goals. Never invent missing cones or complete a pattern. If there are none, return cones:[]." },
+            { inlineData: { mimeType, data: base64 } },
+          ] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 512 },
+        }),
+      },
+    );
+    if (!response.ok) return [];
+    const result = await response.json();
+    const content = (result.candidates?.[0]?.content?.parts ?? [])
+      .map((part: { text?: string }) => part.text ?? "").join("");
+    const parsed = JSON.parse(content || "{}");
+    if (!Array.isArray(parsed.cones)) return [];
+    const cones: Array<{ type: "cone"; x: number; y: number }> = [];
+    for (const raw of parsed.cones.slice(0, 60)) {
+      const x = Number(raw?.x), y = Number(raw?.y);
+      if (![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) continue;
+      if (cones.some((previous) => Math.hypot(previous.x - x, previous.y - y) < 0.012)) continue;
+      cones.push({ type: "cone", x, y });
+    }
+    return cones;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizedItems(items: unknown, calibration: FieldCalibration) {
   if (!Array.isArray(items)) return [];
   return items.slice(0, 120).flatMap((item, index) => {
@@ -1059,6 +1102,14 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const sourceVisualItems: unknown[] = (inventoryItems?.length
       ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [])
       .map(normalizePrintedEquipment).filter((item) => item !== null);
+    // Recover printed cone symbols only when AI missed ALL markers and the
+    // original-photo red-cone detector also found none.
+    const hasRecognizedCones = sourceVisualItems.some((item) =>
+      (item as Record<string, unknown>).type === "cone");
+    if (!hasRecognizedCones && (!Array.isArray(body?.detectedCones) || body.detectedCones.length === 0)) {
+      const recoveredCones = await recoverPrintedCones(key!, visionModel, mimeType, base64);
+      sourceVisualItems.push(...recoveredCones);
+    }
     // "Steunspeler" is a caption beside a blue shirt, NOT a separate board
     // object. Shirt numbers remain on the shirt. Keep unrelated drill text.
     const physicalSource = sourceVisualItems.filter((item) => {
