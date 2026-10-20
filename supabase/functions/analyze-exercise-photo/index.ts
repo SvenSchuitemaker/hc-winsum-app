@@ -1034,10 +1034,21 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // Optional jersey/arrow audits below remain empty and cannot trigger extra calls.
     const jerseyAudit: unknown[] = [];
     let arrowItems: unknown[] = [];
-    try {
-      arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
-    } catch {
-      // Fall back to lines from the primary analysis.
+    // The initial Gemini pass already identifies arrows. Avoid re-uploading and
+    // reanalysing the entire photograph if it returned drawable arrow strokes.
+    // A second full-image request can exceed the HTTP gateway timeout (504).
+    const primaryArrows = Array.isArray(parsed.items)
+      ? parsed.items.filter((item: unknown) => item && typeof item === "object" &&
+          lineTypes.has(String((item as Record<string, unknown>).type)) &&
+          ["x", "y", "x2", "y2"].every((key) =>
+            Number.isFinite(Number((item as Record<string, unknown>)[key]))))
+      : [];
+    if (primaryArrows.length === 0) {
+      try {
+        arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
+      } catch {
+        // The primary result remains valid even if the optional recovery fails.
+      }
     }
     const inventoryItems: unknown[] | null = null;
     // The image is the single source of truth. Detect objects in ORIGINAL full-image
