@@ -184,12 +184,33 @@ function calibratedPoint(x: number, y: number, calibration: FieldCalibration): P
   return { x: Math.min(0.98, Math.max(0.02, transformed.x)), y: Math.min(0.98, Math.max(0.02, transformed.y)) };
 }
 
+// Convert vocabulary from scanned coaching books to editable app objects.
+// A numeral in explanatory text is NOT automatically a player: require an
+// explicit model classification to avoid turning repetitions/step labels into shirts.
+function normalizePrintedEquipment(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as Record<string, unknown>;
+  const type = String(entry.type ?? "").toLowerCase();
+  if (["hat", "marker", "disc", "disk", "flatcone", "flat_cone", "pylon", "pion", "conicalmarker"].includes(type))
+    return { ...entry, type: "cone" };
+  const printedNumber = String(entry.text ?? entry.label ?? "").trim();
+  const numeric = /^([1-9][0-9]{0,2})\\.?$/.exec(printedNumber);
+  if (type === "text" && numeric && (entry.representsPlayer === true ||
+      entry.role === "player" || entry.semanticType === "player")) {
+    return { ...entry, type: "player", label: numeric[1], shirtColor: "black" };
+  }
+  if (type === "player") {
+    const label = String(entry.label ?? entry.text ?? "").trim();
+    return { ...entry, type: "player", label: /^\\d+\\.$/.test(label) ? label.slice(0, -1) : label };
+  }
+  return { ...entry };
+}
+
 function normalizedItems(items: unknown, calibration: FieldCalibration) {
   if (!Array.isArray(items)) return [];
   return items.slice(0, 120).flatMap((item, index) => {
-    if (!item || typeof item !== "object") return [];
-    const entry = item as Record<string, unknown>;
-    if (!itemTypes.has(String(entry.type))) return [];
+    const entry = normalizePrintedEquipment(item);
+    if (!entry || !itemTypes.has(String(entry.type))) return [];
     const x = Number(entry.x), y = Number(entry.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
     const point = calibratedPoint(x, y, calibration);
@@ -965,7 +986,7 @@ Deno.serve(async (request) => {
 
 GEOMETRY FIRST: calibration={bounds:{left,top,right,bottom},goalEdge,rotation,flipHorizontal,corners?}. corners is OPTIONAL and must be {tl:{x,y},tr:{x,y},br:{x,y},bl:{x,y}} in full ORIGINAL image coordinates, where tl/tr/br/bl are the four corners of the same visible hockey field rectangle in image orientation. Return corners ONLY when all four edges/corners are clearly visible and confidently identified; do not hallucinate corners outside the image. The server will use the four corners for mild perspective/skew compensation and otherwise fall back to bounds. All numbers are fractions of the FULL uploaded image [0,1]. Find the top, right, bottom, left borders of the actual rectangular green field (not the outer white canvas or UI). Only crop to clearly visible boundaries; otherwise bounds={left:0,top:0,right:1,bottom:1}. goalEdge must be top/right/bottom/left ONLY when an actual rectangular goal and/or solid shooting circle visibly indicates the attacking end; otherwise unknown. In particular, if the goal is physically at the TOP of the image, goalEdge MUST be "top" even when the picture is taller than wide. rotation is informational; the server computes rotation from goalEdge. Do not mirror by default: flipHorizontal=false except when unmistakably necessary.
 
-TRACE BEFORE INTERPRETING: Study every individual object in source-image coordinates. Return only clearly drawn object centers, one JSON item per object, in the ORIGINAL image frame, NOT cropped, rotated, or moved. No rearrangement, equal spacing, inferred missing teammates, or tidy symmetrical formations. A player jersey icon is ONE player, not a cone; a numbered black jersey is still ONE player. Cones are the small triangular/tall traffic-cone icons; plain little white dots along a hockey field line are PRINTED FIELD MARKINGS and must NOT become balls. For every distinct JERSEY use type="player" and return shirtColor (black,orange,blue,grey,white,red,green) and label (visible jersey number or T; empty if none). Preserve shirt COLOR and NUMBERS literally; never convert shirt icons to attacker or defender circles. Preserve text as separate type="text" item with text exactly as printed (e.g. Steunspeler) and its center coordinates. Orange jerseys are player items, never cones. Keep all visible player positions even if colors repeat; never invent defensive formations, lines or extra objects. Use "hat" for flat colored marker discs only, "cone" for standing cones. Only output a separate "ball" if a distinct ball icon is clearly visible.
+TRACE BEFORE INTERPRETING: Study every individual object in source-image coordinates. Return only clearly drawn object centers, one JSON item per object, in the ORIGINAL image frame, NOT cropped, rotated, or moved. No rearrangement, equal spacing, inferred missing teammates, or tidy symmetrical formations. A player jersey icon is ONE player, not a cone; a numbered black jersey is still ONE player. Cones are the small triangular/tall traffic-cone icons; plain little white dots along a hockey field line are PRINTED FIELD MARKINGS and must NOT become balls. For every distinct JERSEY use type="player" and return shirtColor (black,orange,blue,grey,white,red,green) and label (visible jersey number or T; empty if none). Preserve shirt COLOR and NUMBERS literally; never convert shirt icons to attacker or defender circles. Preserve text as separate type="text" item with text exactly as printed (e.g. Steunspeler) and its center coordinates. Orange jerseys are player items, never cones. Keep all visible player positions even if colors repeat; never invent defensive formations, lines or extra objects. All coaching equipment that marks a location is a cone in this app: tall traffic cones, flat disc markers, hats, small triangular pylons, numbered training markers, faint grey/black cone pictograms and marker stacks MUST be separate type="cone" objects at their actual centres. Never output hat/marker/disc for them. A small player pictogram or numbered player symbol is NEVER a cone. When a number (1, 2, 3, "1.", "2.") denotes a player position, return type="player", label="1"/"2", shirtColor="black" for monochrome source, at the actual player-symbol centre, not text. A number by itself is not sufficient: exercise-step numbers, repeated phase numbers, distance numbers and numbered cone annotations remain text/annotations and must NOT fabricate a player. For numerical text only when there is strong visual evidence that the numeral represents a player, set representsPlayer=true and role="player"; otherwise leave it as text. Keep numbered players separate even if the same number is repeated in the source at different actual positions. Only output a separate "ball" if a distinct ball icon is clearly visible.
 
 
 
@@ -973,7 +994,7 @@ PRINTED COACHING-BOOK DIAGRAMS: The source may be a photographed, faded, grey, m
 
 LINE TRACING: For every visible black arrow, create exactly one line item with strokeColor="#111111", dashed=false, arrowHead=true; with its original x,y start and x2,y2 end at the actual arrow tip. Type passLine for a ball pass and runLine for a player movement when obvious; default guideLine if unclear. Do NOT turn white field markings/circles into exercise lines. Keep original directions. Every line endpoint uses normalized FULL image coordinates. Never add speculative arrows.
 
-JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,text?,strokeColor?,dashed?,arrowHead?}. Types: cone,hat,attacker,defender,trainer,ball,goal,runLine,passLine,guideLine,player,text. Lines require x2,y2, optional lineStyle straight/zigzag/arc/bounce/passeer. Hats may have color white/orange/yellow/red/blue/green. Output object centers and line endpoints with THREE decimal places. Be meticulous with geometry and count; do not create approximate diagrams from a verbal interpretation. Write description fields in Dutch, never reproduce personal/contact information. If not a diagram, items=[].` },
+JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,text?,representsPlayer?,role?,strokeColor?,dashed?,arrowHead?}. Types: cone,hat,attacker,defender,trainer,ball,goal,runLine,passLine,guideLine,player,text. Lines require x2,y2, optional lineStyle straight/zigzag/arc/bounce/passeer. Hats may have color white/orange/yellow/red/blue/green. Output object centers and line endpoints with THREE decimal places. Be meticulous with geometry and count; do not create approximate diagrams from a verbal interpretation. Write description fields in Dutch, never reproduce personal/contact information. If not a diagram, items=[].` },
           { role: "user", content: [
             { type: "text", text: "Convert this hockey exercise photo to editable pieces and draft an exercise description. Any guesswork must be conservative." },
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
@@ -1024,8 +1045,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     // player, cone, ball, caption and both endpoints of every arrow.
     // Do not substitute a second pixel-detection roster, snap to other objects,
     // infer missing team members or tactically rearrange anything.
-    const sourceVisualItems: unknown[] = inventoryItems?.length
-      ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [];
+    const sourceVisualItems: unknown[] = (inventoryItems?.length
+      ? inventoryItems : Array.isArray(parsed.items) ? parsed.items : [])
+      .map(normalizePrintedEquipment).filter((item) => item !== null);
     // "Steunspeler" is a caption beside a blue shirt, NOT a separate board
     // object. Shirt numbers remain on the shirt. Keep unrelated drill text.
     const physicalSource = sourceVisualItems.filter((item) => {
