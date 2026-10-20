@@ -1150,9 +1150,9 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const specialist = await recoverPrintedCones(key!, visionModel, mimeType, base64);
     const sourceDistance = (a: Record<string, unknown>, b: Record<string, unknown>) =>
       Math.hypot(Number(a.x)-Number(b.x), Number(a.y)-Number(b.y));
-    const sourceObjects = sourceVisualItems as Record<string, unknown>[];
+    const photoObjects = sourceVisualItems as Record<string, unknown>[];
     for (const candidate of specialist.numberedPlayers) {
-      const nearby = sourceObjects.filter(obj => sourceDistance(obj, candidate) < 0.065);
+      const nearby = photoObjects.filter(obj => sourceDistance(obj, candidate) < 0.065);
       // A specialist player finding needs an independent matching numbered
       // annotation or existing player; never add one just to complete a diagram.
       const number = String(candidate.label);
@@ -1163,18 +1163,18 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         sourceDistance(obj,candidate) < 0.038);
       if (already) {
         if (!String(already.label ?? "").trim()) already.label = number;
-        for (const label of matchingText) sourceObjects.splice(sourceObjects.indexOf(label), 1);
+        for (const label of matchingText) photoObjects.splice(photoObjects.indexOf(label), 1);
       } else if (matchingText.length === 1 &&
           !nearby.some(obj => ["cone","trainer","attacker","defender"].includes(String(obj.type)) &&
             sourceDistance(obj,candidate) < 0.025)) {
         // Specialist coordinates point at the visible symbol, not at the text.
-        sourceObjects.splice(sourceObjects.indexOf(matchingText[0]), 1);
-        sourceObjects.push(candidate);
+        photoObjects.splice(photoObjects.indexOf(matchingText[0]), 1);
+        photoObjects.push(candidate);
       }
     }
     // Do NOT replace the cone inventory with the red pixel mask: that mask
     // cannot see black, grey or flat markers in scanned coaching books.
-    const primaryCones = sourceObjects.filter(obj => obj.type === "cone");
+    const primaryCones = photoObjects.filter(obj => obj.type === "cone");
     const usedPrimary = new Set<Record<string, unknown>>();
     for (const candidate of specialist.cones) {
       const ranked = primaryCones.filter(obj => !usedPrimary.has(obj))
@@ -1188,10 +1188,10 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
         continue;
       }
       if (primaryCones.some(obj => sourceDistance(obj,candidate) < 0.075) ||
-          sourceObjects.some(obj => ["player","trainer","attacker","defender"].includes(String(obj.type)) &&
+          photoObjects.some(obj => ["player","trainer","attacker","defender"].includes(String(obj.type)) &&
             sourceDistance(obj,candidate) < 0.025) ||
-          sourceObjects.some(obj => obj.type === "cone" && sourceDistance(obj,candidate) < 0.025)) continue;
-      sourceObjects.push(candidate);
+          photoObjects.some(obj => obj.type === "cone" && sourceDistance(obj,candidate) < 0.025)) continue;
+      photoObjects.push(candidate);
       primaryCones.push(candidate);
       usedPrimary.add(candidate);
     }
