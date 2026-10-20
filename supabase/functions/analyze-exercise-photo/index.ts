@@ -227,6 +227,7 @@ function normalizedItems(items: unknown, calibration: FieldCalibration) {
 // normal coordinate/label alignment. A list entry is one physical object,
 // including adjacent/overlapping shirts. No expected team sizes are assumed.
 async function analyzeObjectInventory(key: string, model: string, mimeType: string, base64: string): Promise<unknown[] | null> {
+  return null; // Disabled in fast Gemini mode: avoid Edge execution timeout.
   const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -283,6 +284,7 @@ async function auditMissingArrowheads(
   key: string, model: string, mimeType: string, base64: string,
   known: Array<{ x: number; y: number; x2: number; y2: number }>,
 ): Promise<unknown[]> {
+  return []; // Disabled in fast Gemini mode: avoid Edge execution timeout.
   try {
     const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -317,6 +319,7 @@ async function analyzeActorConnections(
   lines: Array<{ id: number; x: number; y: number; x2: number; y2: number; type: string }>,
   mode: "trace" | "verify" = "trace",
 ): Promise<Array<{ lineId: number; fromActorId: number; toActorId: number; type: string; tail: { x: number; y: number }; tip: { x: number; y: number } }>> {
+  return []; // Disabled in fast Gemini mode: avoid Edge execution timeout.
   if (!actors.length || !lines.length) return [];
   try {
     const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
@@ -381,6 +384,7 @@ async function verifyJerseyNumbers(
  */
 async function verifyArrowEndpoints(key: string, model: string, mimeType: string,
   base64: string, arrows: Array<Record<string, unknown>>): Promise<unknown[]> {
+  return []; // Disabled in fast Gemini mode: avoid Edge execution timeout.
   if (!arrows.length) return [];
   const candidates = arrows.slice(0, 20).map((arrow, i) => ({
     id: i, x: arrow.x, y: arrow.y, x2: arrow.x2, y2: arrow.y2,
@@ -413,6 +417,7 @@ async function verifyArrowEndpoints(key: string, model: string, mimeType: string
  * A failed audit leaves the original reconstruction intact.
  */
 async function analyzeJerseyLabels(key: string, model: string, mimeType: string, base64: string): Promise<unknown[]> {
+  return []; // Disabled in fast Gemini mode: avoid Edge execution timeout.
   const response = await geminiFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -1002,30 +1007,18 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     const result = await response.json();
     const parsed = JSON.parse(result.choices?.[0]?.message?.content || "{}");
     const calibration = parseCalibration(parsed.calibration);
-    // Dedicated, optional number-reading pass. Keep the original import if
-    // the provider fails or returns ambiguous labels.
-    let jerseyAudit: unknown[] = [];
-    try {
-      jerseyAudit = await analyzeJerseyLabels(key!, visionModel, mimeType, base64);
-    } catch {
-      // Never fail the import because of the optional jersey audit.
-    }
-    // The initial pass finds jerseys/cones/text and calibrates the field. Trace arrows
-    // separately to avoid a common failure mode where players are connected arbitrarily.
+    // Keep expensive Gemini image passes bounded: the former implementation
+    // made many consecutive full-image calls and could exceed the Edge limit (HTTP 546).
+    // Use the primary analysis for inventory and a single focused arrow pass.
+    // Optional jersey/arrow audits below remain empty and cannot trigger extra calls.
+    const jerseyAudit: unknown[] = [];
     let arrowItems: unknown[] = [];
     try {
       arrowItems = await analyzeArrows(key!, visionModel, mimeType, base64);
     } catch {
-      // A transient second-pass failure must not discard a successful first pass.
+      // Fall back to lines from the primary analysis.
     }
-    // Prefer a dedicated inventory that explicitly counts all individual
-    // objects. If that optional pass fails, retain the original vision result.
-    let inventoryItems: unknown[] | null = null;
-    try {
-      inventoryItems = await analyzeObjectInventory(key!, visionModel, mimeType, base64);
-    } catch {
-      // An unavailable inventory pass must not break normal imports.
-    }
+    const inventoryItems: unknown[] | null = null;
     // The image is the single source of truth. Detect objects in ORIGINAL full-image
     // normalized coordinates, then apply the same calibrated mapping ONCE to every
     // player, cone, ball, caption and both endpoints of every arrow.
