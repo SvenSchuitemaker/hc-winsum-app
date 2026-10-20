@@ -227,9 +227,12 @@ function promotePrintedPlayers(items: Array<Record<string, unknown>>): Array<Rec
     }
     // An ordinary digit near equipment is ambiguous unless the model saw a
     // player symbol. Never turn a numbered cone or drill step into a shirt.
-    const nearbyCone = items.some(other => other.type === "cone" && distance(item, other) < 0.04);
     const visualEvidence = /player|speler|shirt|jersey|pawn|persoon|circle|cirkel|silhouette|figuur/.test(context);
-    if (!explicit && (!visualEvidence || nearbyCone)) return [item];
+    // A player number may be immediately beside a cone. A cone nearby is
+    // not a reason to discard an independently classified player symbol.
+    // Only a near-identical equipment center is too ambiguous to promote.
+    const onEquipment = items.some(other => other.type === "cone" && distance(item, other) < 0.012);
+    if (!visualEvidence && !explicit || onEquipment) return [item];
     const player: Record<string, unknown> = {
       ...item, type: "player", label: number[1],
       shirtColor: ["black","orange","blue","white","red","green"].includes(String(item.shirtColor))
@@ -1152,25 +1155,37 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       Math.hypot(Number(a.x)-Number(b.x), Number(a.y)-Number(b.y));
     const photoObjects = sourceVisualItems as Record<string, unknown>[];
     for (const candidate of specialist.numberedPlayers) {
-      const nearby = photoObjects.filter(obj => sourceDistance(obj, candidate) < 0.065);
-      // A specialist player finding needs an independent matching numbered
-      // annotation or existing player; never add one just to complete a diagram.
       const number = String(candidate.label);
-      const matchingText = nearby.filter(obj => obj.type === "text" &&
-        /^([1-9][0-9]?)\\.?$/.exec(String(obj.text ?? "").trim())?.[1] === number);
-      const already = nearby.find(obj => obj.type === "player" &&
-        (String(obj.label ?? "").trim() === number || !String(obj.label ?? "").trim()) &&
-        sourceDistance(obj,candidate) < 0.038);
-      if (already) {
-        if (!String(already.label ?? "").trim()) already.label = number;
-        for (const label of matchingText) photoObjects.splice(photoObjects.indexOf(label), 1);
-      } else if (matchingText.length === 1 &&
-          !nearby.some(obj => ["cone","trainer","attacker","defender"].includes(String(obj.type)) &&
-            sourceDistance(obj,candidate) < 0.025)) {
-        // Specialist coordinates point at the visible symbol, not at the text.
-        photoObjects.splice(photoObjects.indexOf(matchingText[0]), 1);
-        photoObjects.push(candidate);
+      const nearby = photoObjects.filter(obj => sourceDistance(obj, candidate) < 0.11);
+      const matchingText = nearby
+        .filter(obj => obj.type === "text" &&
+          /^([1-9][0-9]?)\\.?$/.exec(String(obj.text ?? "").trim())?.[1] === number)
+        .sort((a,b) => sourceDistance(a,candidate)-sourceDistance(b,candidate));
+      const existing = nearby.filter(obj => obj.type === "player" &&
+        sourceDistance(obj,candidate) < 0.045)
+        .sort((a,b) => sourceDistance(a,candidate)-sourceDistance(b,candidate))[0];
+      if (existing) {
+        // Don't overwrite a different printed number or create overlapping shirts.
+        if (String(existing.label ?? "").trim() &&
+            String(existing.label).trim() !== number) continue;
+        if (!String(existing.label ?? "").trim()) existing.label = number;
+        // Remove only the label immediately corresponding to the same symbol.
+        if (matchingText.length === 1 && sourceDistance(matchingText[0],candidate) < 0.055)
+          photoObjects.splice(photoObjects.indexOf(matchingText[0]), 1);
+        continue;
       }
+      // Two independent Gemini passes must agree on both identity and area.
+      // Nearby cones are expected in hockey diagrams: block only when the
+      // specialist player icon is practically centered on a cone or another
+      // actor, not simply because a pylon is within the same drill station.
+      const nearbyEquipment = photoObjects.some(obj =>
+        ["cone","trainer","attacker","defender"].includes(String(obj.type)) &&
+        sourceDistance(obj,candidate) < 0.012);
+      if (matchingText.length !== 1 ||
+          sourceDistance(matchingText[0],candidate) > 0.075 ||
+          nearbyEquipment) continue;
+      photoObjects.splice(photoObjects.indexOf(matchingText[0]), 1);
+      photoObjects.push(candidate);
     }
     // Do NOT replace the cone inventory with the red pixel mask: that mask
     // cannot see black, grey or flat markers in scanned coaching books.
