@@ -1502,19 +1502,30 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       }
       return updated;
     };
-    // Red pixel anchors can supplement the original inventory, not replace it.
-    // A partial color mask must never erase low-contrast printed pylons.
-    const conePixelsCredible = coneAnchors.length >= 1 && coneAnchors.length <= 60;
+    // The red-pixel detector can pick up shirt fragments and image decorations,
+    // especially near the crop border. It is NOT independent proof of a cone.
+    // Keep the Gemini primary + specialist cone inventory unchanged; do not
+    // manufacture additional cones from unmatched red pixel components.
+    const conePixelsCredible = coneAnchors.length > 0 && coneAnchors.length <= 60;
     const reliablePhysical = [...physicalSource];
+    // Pixel anchors are advisory only, and only support a uniquely matched
+    // existing cone within a small radius. Avoid moving markers on weak proof.
     if (conePixelsCredible) {
+      const existingCones = reliablePhysical.filter(raw =>
+        (raw as Record<string, unknown>).type === "cone") as Record<string, unknown>[];
+      const claimed = new Set<Record<string, unknown>>();
       for (const pixel of coneAnchors) {
-        const candidate = { type: "cone", x: pixel.x, y: pixel.y };
-        if (reliablePhysical.some(raw => {
-          const item = raw as Record<string, unknown>;
-          return (item.type === "cone" || item.type === "player") &&
-            Math.hypot(Number(item.x)-pixel.x,Number(item.y)-pixel.y) < 0.035;
-        })) continue;
-        reliablePhysical.push(candidate);
+        const matches = existingCones.filter(cone => !claimed.has(cone))
+          .map(cone => ({cone, distance: Math.hypot(Number(cone.x)-pixel.x, Number(cone.y)-pixel.y)}))
+          .sort((left, right) => left.distance - right.distance);
+        if (matches.length !== 1 && (!matches[0] || matches[0].distance > 0.018 ||
+            matches[1].distance - matches[0].distance < 0.025)) continue;
+        if (!matches[0] || matches[0].distance > 0.018) continue;
+        claimed.add(matches[0].cone);
+        // Preserve vision coordinates unless independent pixel data agrees
+        // locally; this guards against incorrectly snapped book markers.
+        matches[0].cone.x = pixel.x;
+        matches[0].cone.y = pixel.y;
       }
     }
     // The color-based shirt detector is advisory. Only replace a shirt center
