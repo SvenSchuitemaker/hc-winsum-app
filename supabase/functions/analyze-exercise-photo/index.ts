@@ -1174,9 +1174,26 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
     }
     // Do NOT replace the cone inventory with the red pixel mask: that mask
     // cannot see black, grey or flat markers in scanned coaching books.
+    // Do not let an object outside the calibrated photo crop collapse to
+    // the top/left canvas border. The coordinate clamp in calibratedPoint
+    // is appropriate for drawing, but not evidence that a cone exists.
+    const insideFieldCrop = (obj: Record<string, unknown>) => {
+      const x = Number(obj.x), y = Number(obj.y);
+      const { left, right, top, bottom } = calibration.bounds;
+      const margin = 0.008;
+      return Number.isFinite(x) && Number.isFinite(y) &&
+        x >= left - margin && x <= right + margin &&
+        y >= top - margin && y <= bottom + margin;
+    };
+    for (let i = photoObjects.length - 1; i >= 0; i--) {
+      if (photoObjects[i].type === "cone" && !insideFieldCrop(photoObjects[i])) {
+        photoObjects.splice(i, 1);
+      }
+    }
     const primaryCones = photoObjects.filter(obj => obj.type === "cone");
     const usedPrimary = new Set<Record<string, unknown>>();
     for (const candidate of specialist.cones) {
+      if (!insideFieldCrop(candidate)) continue;
       const ranked = primaryCones.filter(obj => !usedPrimary.has(obj))
         .map(obj => ({obj,d:sourceDistance(obj,candidate)})).sort((a,b)=>a.d-b.d);
       const best = ranked[0];
@@ -1191,6 +1208,19 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
           photoObjects.some(obj => ["player","trainer","attacker","defender"].includes(String(obj.type)) &&
             sourceDistance(obj,candidate) < 0.025) ||
           photoObjects.some(obj => obj.type === "cone" && sourceDistance(obj,candidate) < 0.025)) continue;
+      // Specialist-only findings must have independent pixel evidence.
+      // Otherwise a hallucinated marker can appear as an extra cone near
+      // the upper-left corner. Keep the primary Gemini inventory as-is;
+      // this check applies only to NEW specialist additions.
+      const confirmedByPixels = Array.isArray(body?.detectedCones) &&
+        body.detectedCones.some((raw: unknown) => {
+          if (!raw || typeof raw !== "object") return false;
+          const anchor = raw as Record<string, unknown>;
+          const ax = Number(anchor.x), ay = Number(anchor.y);
+          return Number.isFinite(ax) && Number.isFinite(ay) &&
+            Math.hypot(ax - Number(candidate.x), ay - Number(candidate.y)) < 0.028;
+        });
+      if (!confirmedByPixels) continue;
       photoObjects.push(candidate);
       primaryCones.push(candidate);
       usedPrimary.add(candidate);
