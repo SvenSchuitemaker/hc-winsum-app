@@ -96,15 +96,21 @@ export async function analyzeExercisePhoto(photo: SelectedExercisePhoto): Promis
         body: { mimeType: photo.mimeType, base64: photo.base64, detectedCones, detectedPlayers },
     });
     if (error) {
-        let message = "AI-analyse is niet beschikbaar. Controleer of de Edge Function is gedeployed en GEMINI_API_KEY is ingesteld.";
-        const response = (error as { context?: Response }).context;
+        const context = (error as { context?: unknown }).context;
+        const response = context && typeof context === "object" && "status" in context
+            ? context as Response : null;
+        let message = response
+            ? `AI-server gaf HTTP ${response.status}. Probeer opnieuw of controleer de Supabase-functielogs.`
+            : "Geen verbinding met de AI-server. Controleer internetverbinding en probeer opnieuw.";
         if (response && typeof response.json === "function") {
             try {
                 const body = await response.json();
                 if (typeof body?.error === "string") message = body.error;
             } catch {
-                // Keep the fallback message when the server did not return JSON.
+                // Keep the HTTP status, even if the gateway sent a non-JSON error.
             }
+        } else if (context instanceof Error) {
+            message = `AI-verzoek kon niet worden verstuurd: ${context.message}`;
         }
         throw new Error(message);
     }
