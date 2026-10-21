@@ -38,9 +38,9 @@ export default function ConceptenScreen() {
     setLoading(true);
     try {
       const {data,error:fetchError} = await supabase.from("exercise_concepts")
-        .select("*").eq("user_id", user.id).order("created_at",{ascending:false});
+        .select("*").eq("user_id", user.id).in("status", ["ready", "rejected"]).order("created_at",{ascending:false});
       if (fetchError) throw fetchError;
-      setConcepts((data || []) as Concept[]);
+      setConcepts(((data || []) as Concept[]).filter(concept => concept.status !== "approved"));
     } catch (e) { setError(e instanceof Error ? e.message : "Concepten laden mislukt."); }
     finally { setLoading(false); }
   }
@@ -173,6 +173,7 @@ export default function ConceptenScreen() {
         .update({status:"approved",published_exercise_id:created.id,reviewed_at:new Date().toISOString()})
         .eq("id",selected.id).eq("status","ready");
       if(stateError) throw stateError;
+      setConcepts(current => current.filter(concept => concept.id !== selected.id));
       setSelected(null);setLayout(null);await reload();
     } catch(e) { setError(e instanceof Error ? e.message : "Publiceren mislukt."); }
     finally {setBusy(false);}
