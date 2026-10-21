@@ -2,6 +2,7 @@ import { encode } from "base64-arraybuffer";
 import { analyzeExercisePhoto } from "../lib/exercisePhotoImport";
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import ExerciseBoardEditor, { type ExerciseBoardEditorRef, type ExerciseBoardLayout } from "../components/ExerciseBoardEditor";
 import { uploadExerciseBoardPreview } from "../lib/exerciseBoardStorage";
@@ -111,18 +112,20 @@ export default function ConceptenScreen() {
     finally {setBusy(false);}
   }
   async function reject() {
-    if (!supabase || !selected || busy) return;
+    if (!supabase || !selected || busy || selected.status !== "ready") return;
     setBusy(true); setError("");
     try {
-      const {error:updateError} = await supabase.from("exercise_concepts")
-        .update({status:"rejected",reviewed_at:new Date().toISOString()})
-        .eq("id",selected.id).eq("status","ready");
-      if (updateError) throw updateError;
-      setSelected(null); await reload();
-    } catch(e) { setError(e instanceof Error ? e.message : "Afwijzen mislukt."); }
+      const {data, error:deleteError} = await supabase.from("exercise_concepts")
+        .delete().eq("id",selected.id).eq("user_id",user?.id).eq("status","ready")
+        .select("id");
+      if (deleteError) throw deleteError;
+      if (!data?.some(row=>row.id===selected.id)) throw new Error("Concept kon niet worden verwijderd. Controleer je rechten.");
+      setConcepts(current=>current.filter(concept=>concept.id!==selected.id));
+      setSelected(null);setLayout(null);
+    } catch(e) { setError(e instanceof Error ? e.message : "Concept verwijderen mislukt."); }
     finally { setBusy(false); }
   }
-  async function approve() {
+    async function approve() {
     if (!supabase || !selected || !layout || !user?.id || busy || selected.status !== "ready") return;
     if (!layout.items.length) {setError("Dit concept heeft geen tekenobjecten.");return;}
     setBusy(true);setError("");
@@ -161,7 +164,7 @@ export default function ConceptenScreen() {
   if(role !== "super_admin") return <View style={styles.root}><Text style={styles.body}>Alleen hoofdbeheerders kunnen concepten beoordelen.</Text></View>;
   return <View style={styles.root}>
     <ScrollView contentContainerStyle={styles.content}>
-      <Pressable onPress={()=>router.back()}><Text style={styles.link}>← Terug</Text></Pressable>
+      <Pressable style={styles.backButton} onPress={()=>router.replace("/(tabs)/nieuwe-oefeningen" as never)}><Ionicons name="arrow-back" size={20} color={COLORS.text}/><Text style={styles.backText}>Terug naar nieuwe oefening</Text></Pressable>
       <Text style={styles.heading}>AI-concepten</Text>
       <Text style={styles.body}>Bekijk elke tekening. Alleen goedgekeurde concepten worden openbaar.</Text>
       <Pressable onPress={()=>void reload()}><Text style={styles.link}>Vernieuwen</Text></Pressable>
@@ -177,6 +180,7 @@ export default function ConceptenScreen() {
     </ScrollView>
     <Modal visible={!!selected} animationType="slide" onRequestClose={()=>{if(!busy)setSelected(null);}}>
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+        <Pressable style={styles.backButton} disabled={busy} onPress={()=>{setSelected(null);setLayout(null);setError("");}}><Ionicons name="arrow-back" size={20} color={COLORS.text}/><Text style={styles.backText}>Terug naar concepten</Text></Pressable>
         <Text style={styles.heading}>{selected?.title}</Text>
         <Text style={styles.body}>{selected?.explanation || "Geen beschrijving gevonden."}</Text>
         {!!selected?.source_image_url && <>
@@ -240,7 +244,7 @@ export default function ConceptenScreen() {
         {busy && <ActivityIndicator color={COLORS.primaryLight}/>}
         {selected?.status==="ready" && <>
           <Pressable style={styles.button} disabled={busy} onPress={()=>void approve()}><Text style={styles.buttonText}>Goedkeuren en openbaar plaatsen</Text></Pressable>
-          <Pressable style={styles.button} disabled={busy} onPress={()=>void reject()}><Text style={styles.buttonText}>Afwijzen</Text></Pressable>
+          <Pressable style={styles.button} disabled={busy} onPress={()=>void reject()}><Text style={styles.buttonText}>Afwijzen en verwijderen</Text></Pressable>
         </>}
         <Pressable style={styles.button} disabled={busy} onPress={()=>{setSelected(null);setLayout(null);setError("");}}>
           <Text style={styles.buttonText}>Sluiten</Text>
@@ -251,6 +255,8 @@ export default function ConceptenScreen() {
 }
 const styles=StyleSheet.create({
  root:{flex:1,backgroundColor:COLORS.background},
+ backButton:{flexDirection:"row",alignItems:"center",gap:10,alignSelf:"flex-start",paddingVertical:12,paddingHorizontal:14,backgroundColor:COLORS.surfaceLight,borderRadius:RADIUS.md},
+ backText:{color:COLORS.text,fontWeight:"800"},
  content:{padding:SPACING.md,paddingBottom:SPACING.xxl,gap:12},
  heading:{fontSize:24,fontWeight:"800",color:COLORS.text},
  title:{fontSize:17,fontWeight:"700",color:COLORS.text},
