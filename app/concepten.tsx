@@ -140,7 +140,7 @@ export default function ConceptenScreen() {
       if(insertError || !created?.id) throw insertError || new Error("Oefening opslaan mislukt.");
       try {
         const image=await uploadExerciseBoardPreview({
-          exerciseId:created.id,title:selected.title,boardRef:editor.current,
+          exerciseId:created.id,title:selected.title,boardRef:editor.current,boardLayout:layout,
         });
         const {error:imageError}=await supabase.from("exercises").update({image_url:image}).eq("id",created.id);
         if(imageError) throw imageError;
