@@ -113,6 +113,20 @@ export default function ConceptenScreen() {
     } catch(e) {setError(e instanceof Error ? e.message : "Uitsnede opslaan mislukt.");}
     finally {setBusy(false);}
   }
+  async function deleteRejected(concept: Concept) {
+    if (!supabase || !user?.id || busy || concept.status !== "rejected") return;
+    setBusy(true);setError("");
+    try {
+      const {data,error:deleteError}=await supabase.from("exercise_concepts")
+        .delete().eq("id",concept.id).eq("user_id",user.id)
+        .eq("status","rejected").select("id");
+      if(deleteError)throw deleteError;
+      if(!data?.some(row=>row.id===concept.id))throw new Error("Het afgewezen concept kon niet worden verwijderd.");
+      setConcepts(current=>current.filter(item=>item.id!==concept.id));
+      if(selected?.id===concept.id){setSelected(null);setLayout(null);}
+    }catch(error){setError(error instanceof Error?error.message:"Verwijderen mislukt.");}
+    finally{setBusy(false);}
+  }
   async function reject() {
     if (!supabase || !selected || busy || selected.status !== "ready") return;
     setBusy(true); setError("");
@@ -178,7 +192,11 @@ export default function ConceptenScreen() {
         <Text style={styles.title}>{c.title}</Text>
         <Text style={styles.body}>{c.category_slug} · {c.status==="ready"?"Wacht op controle":c.status==="approved"?"Goedgekeurd":"Afgewezen"}</Text>
         {c.source_image_url && <Image source={{uri:c.source_image_url}} style={styles.thumb} resizeMode="contain"/>}
-        <Text style={styles.link}>Bekijk tekening →</Text>
+        {c.status==="rejected" ? <Pressable style={styles.deleteButton} disabled={busy}
+          onPress={(event)=>{event.stopPropagation();void deleteRejected(c);}}>
+          <Ionicons name="trash-outline" size={17} color="#FFFFFF"/>
+          <Text style={styles.buttonText}>Afgewezen concept verwijderen</Text>
+        </Pressable> : <Text style={styles.link}>Bekijk tekening →</Text>}
       </Pressable>)}
       </View>
       {!loading && !concepts.length && <Text style={styles.body}>Nog geen concepten. Kies eerst maximaal 20 afbeeldingen.</Text>}
@@ -271,6 +289,7 @@ export default function ConceptenScreen() {
 }
 const styles=StyleSheet.create({
  root:{flex:1,backgroundColor:COLORS.background},
+ deleteButton:{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:8,padding:12,borderRadius:RADIUS.md,backgroundColor:"#9B3440"},
  desktopModalContent:{width:"100%",maxWidth:1480,alignSelf:"center",paddingHorizontal:24},
  reviewColumns:{gap:18},
  reviewColumnsDesktop:{flexDirection:"row",alignItems:"flex-start",gap:28},
