@@ -20,6 +20,9 @@ export default function ConceptenScreen() {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [selected, setSelected] = useState<Concept | null>(null);
   const [layout, setLayout] = useState<ExerciseBoardLayout | null>(null);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.65);
+  const [showExercisePreview, setShowExercisePreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -41,6 +44,9 @@ export default function ConceptenScreen() {
   function open(concept: Concept) {
     setError(""); setSelected(concept);
     setLayout({...concept.board_layout, backgroundImageUrl: null});
+    setShowOverlay(false);
+    setOverlayOpacity(0.65);
+    setShowExercisePreview(true);
   }
   async function reject() {
     if (!supabase || !selected || busy) return;
@@ -115,8 +121,43 @@ export default function ConceptenScreen() {
           <Text style={styles.title}>Originele foto</Text>
           <Image source={{uri:selected.source_image_url}} resizeMode="contain" style={styles.original}/>
         </>}
+        <Text style={styles.title}>Voorbeeld zoals in de oefeningenbibliotheek</Text>
+        <Pressable onPress={()=>setShowExercisePreview(value=>!value)}>
+          <Text style={styles.link}>{showExercisePreview ? "Verberg oefeninggegevens" : "Toon oefeninggegevens"}</Text>
+        </Pressable>
+        {showExercisePreview && <View style={styles.previewCard}>
+          <Text style={styles.heading}>{selected?.title}</Text>
+          {!!selected?.subtitle && <Text style={styles.subtitle}>{selected.subtitle}</Text>}
+          <View style={styles.badges}>
+            {!!selected?.difficulty && <Text style={styles.badge}>{selected.difficulty}</Text>}
+            {selected?.audience?.map(age=><Text key={age} style={styles.badge}>{age}</Text>)}
+          </View>
+          {([
+            ["Uitleg", selected?.explanation],
+            ["Instructies", selected?.instructions],
+            ["Vereenvoudiging", selected?.simplify],
+            ["Uitbouw", selected?.build_up],
+          ] as const).map(([name, value]) => value ? <View key={name} style={styles.detailSection}>
+            <Text style={styles.title}>{name}</Text>
+            <Text style={styles.body}>{value}</Text>
+          </View> : null)}
+        </View>}
         <Text style={styles.title}>Bewerkbare AI-tekening</Text>
-        {layout && <ExerciseBoardEditor key={selected?.id} ref={editor} value={layout} onChange={setLayout}/>}
+        <Text style={styles.body}>De foto-overlay is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
+        <Pressable style={styles.button} onPress={()=>setShowOverlay(value=>!value)}>
+          <Text style={styles.buttonText}>{showOverlay ? "Verberg foto-overlay" : "Toon foto-overlay"}</Text>
+        </Pressable>
+        {showOverlay && <>
+          <Text style={styles.body}>Foto: {Math.round(overlayOpacity*100)}% zichtbaar</Text>
+          <View style={styles.overlayButtons}>
+            <Pressable style={styles.smallButton} onPress={()=>setOverlayOpacity(value=>Math.max(0.15,Math.round((value-0.1)*100)/100))}><Text style={styles.buttonText}>−</Text></Pressable>
+            <Pressable style={styles.smallButton} onPress={()=>setOverlayOpacity(value=>Math.min(1,Math.round((value+0.1)*100)/100))}><Text style={styles.buttonText}>+</Text></Pressable>
+          </View>
+        </>}
+        {layout && <ExerciseBoardEditor key={selected?.id} ref={editor}
+          value={{...layout,backgroundImageUrl:showOverlay ? selected?.source_image_url : null,backgroundOpacity:overlayOpacity}}
+          onChange={nextLayout=>setLayout({...nextLayout,backgroundImageUrl:null})}/>}
+
         {!!error && <Text style={styles.error}>{error}</Text>}
         {busy && <ActivityIndicator color={COLORS.primaryLight}/>}
         {selected?.status==="ready" && <>
@@ -139,6 +180,13 @@ const styles=StyleSheet.create({
  error:{color:"#F47777"},
  link:{color:COLORS.primaryLight,fontWeight:"700",marginVertical:6},
  card:{padding:SPACING.md,borderRadius:RADIUS.lg,backgroundColor:COLORS.surface,gap:8},
+ previewCard:{padding:SPACING.md,borderRadius:RADIUS.lg,backgroundColor:COLORS.surface,gap:10},
+ subtitle:{color:COLORS.primaryLight,fontSize:16,fontWeight:"700"},
+ badges:{flexDirection:"row",flexWrap:"wrap",gap:8},
+ badge:{color:COLORS.accent,backgroundColor:COLORS.surfaceLight,padding:9,borderRadius:RADIUS.pill,overflow:"hidden"},
+ detailSection:{padding:SPACING.md,backgroundColor:COLORS.surfaceLight,borderRadius:RADIUS.md,gap:8},
+ overlayButtons:{flexDirection:"row",gap:10},
+ smallButton:{flex:1,backgroundColor:COLORS.primary,borderRadius:RADIUS.md,padding:12,alignItems:"center"},
  thumb:{height:110,width:"100%"},
  original:{height:240,width:"100%"},
  button:{backgroundColor:COLORS.primary,borderRadius:RADIUS.md,padding:15,alignItems:"center"},
