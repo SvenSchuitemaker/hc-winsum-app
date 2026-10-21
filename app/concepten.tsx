@@ -3,7 +3,7 @@ import { analyzeExercisePhoto } from "../lib/exercisePhotoImport";
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import ExerciseBoardEditor, { type ExerciseBoardEditorRef, type ExerciseBoardLayout } from "../components/ExerciseBoardEditor";
 import { uploadExerciseBoardPreview } from "../lib/exerciseBoardStorage";
 import { supabase } from "../lib/supabase";
@@ -20,6 +20,8 @@ type Concept = {
 
 export default function ConceptenScreen() {
   const { user, role } = useAuth();
+  const { width: viewportWidth } = useWindowDimensions();
+  const desktop = viewportWidth >= 1050;
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [selected, setSelected] = useState<Concept | null>(null);
   const [layout, setLayout] = useState<ExerciseBoardLayout | null>(null);
@@ -171,17 +173,28 @@ export default function ConceptenScreen() {
       <Pressable onPress={()=>void reload()}><Text style={styles.link}>Vernieuwen</Text></Pressable>
       {!!error && <Text style={styles.error}>{error}</Text>}
       {loading && <ActivityIndicator color={COLORS.primaryLight}/>}
-      {concepts.map(c=><Pressable key={c.id} style={styles.card} onPress={()=>open(c)}>
+      <View style={[styles.conceptList, desktop && styles.conceptListDesktop]}>
+      {concepts.map(c=><Pressable key={c.id} style={[styles.card, desktop && styles.conceptCardDesktop]} onPress={()=>open(c)}>
         <Text style={styles.title}>{c.title}</Text>
         <Text style={styles.body}>{c.category_slug} · {c.status==="ready"?"Wacht op controle":c.status==="approved"?"Goedgekeurd":"Afgewezen"}</Text>
         {c.source_image_url && <Image source={{uri:c.source_image_url}} style={styles.thumb} resizeMode="contain"/>}
         <Text style={styles.link}>Bekijk tekening →</Text>
       </Pressable>)}
+      </View>
       {!loading && !concepts.length && <Text style={styles.body}>Nog geen concepten. Kies eerst maximaal 20 afbeeldingen.</Text>}
     </ScrollView>
     <Modal visible={!!selected} animationType="slide" onRequestClose={()=>{if(!busy)setSelected(null);}}>
-      <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.root} contentContainerStyle={[styles.content, desktop && styles.desktopModalContent]}>
         <Pressable style={styles.backButton} disabled={busy} onPress={()=>{setSelected(null);setLayout(null);setError("");}}><Ionicons name="arrow-back" size={20} color={COLORS.text}/><Text style={styles.backText}>Terug naar concepten</Text></Pressable>
+        <View style={[styles.reviewColumns, desktop && styles.reviewColumnsDesktop]}>
+          <View style={[styles.editorColumn, desktop && styles.editorColumnDesktop]}>
+            <Text style={styles.title}>Tekenveld controleren en bewerken</Text>
+        <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
+        {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
+          value={layout}
+          onChange={setLayout}/>}
+          </View>
+          <View style={[styles.detailsColumn, desktop && styles.detailsColumnDesktop]}>
         <Text style={styles.heading}>{selected?.title}</Text>
         <Text style={styles.body}>{selected?.explanation || "Geen beschrijving gevonden."}</Text>
         {!!selected?.source_image_url && <>
@@ -209,6 +222,7 @@ export default function ConceptenScreen() {
             <Text style={styles.body}>{value}</Text>
           </View> : null)}
         </View>}
+
         <Text style={styles.title}>Bewerkbare AI-tekening</Text>
         {selected?.status==="ready" && (
           <Pressable style={styles.button} disabled={calibrating || busy}
@@ -235,10 +249,8 @@ export default function ConceptenScreen() {
             <Text style={styles.buttonText}>Uitsnede bewaren</Text>
           </Pressable>
         </View>}
-        <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
-        {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
-          value={layout}
-          onChange={setLayout}/>}
+
+
 
 
         {!!error && <Text style={styles.error}>{error}</Text>}
@@ -250,12 +262,25 @@ export default function ConceptenScreen() {
         <Pressable style={styles.button} disabled={busy} onPress={()=>{setSelected(null);setLayout(null);setError("");}}>
           <Text style={styles.buttonText}>Sluiten</Text>
         </Pressable>
+
+          </View>
+        </View>
       </ScrollView>
     </Modal>
   </View>;
 }
 const styles=StyleSheet.create({
  root:{flex:1,backgroundColor:COLORS.background},
+ desktopModalContent:{width:"100%",maxWidth:1480,alignSelf:"center",paddingHorizontal:24},
+ reviewColumns:{gap:18},
+ reviewColumnsDesktop:{flexDirection:"row",alignItems:"flex-start",gap:28},
+ editorColumn:{width:"100%"},
+ editorColumnDesktop:{width:650,maxWidth:"53%",flexShrink:1},
+ detailsColumn:{width:"100%",gap:12},
+ detailsColumnDesktop:{flex:1,minWidth:0},
+ conceptList:{gap:12},
+ conceptListDesktop:{flexDirection:"row",flexWrap:"wrap",maxWidth:1200},
+ conceptCardDesktop:{width:310},
  backButton:{flexDirection:"row",alignItems:"center",gap:10,alignSelf:"flex-start",paddingVertical:12,paddingHorizontal:14,backgroundColor:COLORS.surfaceLight,borderRadius:RADIUS.md},
  backText:{color:COLORS.text,fontWeight:"800"},
  content:{padding:SPACING.md,paddingBottom:SPACING.xxl,gap:12},
