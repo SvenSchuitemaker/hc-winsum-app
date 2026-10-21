@@ -1210,37 +1210,48 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       primaryCones.push(candidate);
       usedPrimary.add(candidate);
     }
-    // Printed '1/2' identifies two interchangeable players at ONE station.
-    // Keep them distinct and slightly apart on the board; never turn a plain
-    // numbered exercise step into a player without actor/arrow evidence.
-    const pairLabel = (v: unknown) =>
-      /^1\\.?\\s*\\/\\s*2\\.?$/.test(String(v ?? "").trim());
-    const pairCandidates = photoObjects.filter(obj =>
+    // A printed 1/2 or 1./2. marks TWO players at EACH starting station.
+    // Gemini may already have placed shirt 1 there, so complete the pair
+    // rather than discarding the label when a nearby player exists.
+    const pairLabel = (value: unknown) =>
+      /^1\.?\s*\/\s*2\.?$/.test(String(value ?? "").trim());
+    const pairMarkers = photoObjects.filter(obj =>
       (obj.type === "player" && pairLabel(obj.label)) ||
       (obj.type === "text" && pairLabel(obj.text ?? obj.label)));
-    for (const marker of pairCandidates) {
+    for (const marker of pairMarkers) {
       const x = Number(marker.x), y = Number(marker.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const description = [marker.role,marker.visualType,marker.description]
-        .map(v=>String(v ?? "").toLowerCase()).join(" ");
-      const actorEvidence = marker.type === "player" || marker.representsPlayer === true ||
-        /speler|player|shirt|jersey|startpositie/.test(description);
-      const lineEndpoint = photoObjects.some(obj =>
-        lineTypes.has(String(obj.type)) &&
-        (Math.hypot(Number(obj.x)-x,Number(obj.y)-y)<0.075 ||
-         Math.hypot(Number(obj.x2)-x,Number(obj.y2)-y)<0.075));
-      if (!actorEvidence && !lineEndpoint) continue;
-      const otherPlayers = photoObjects.filter(obj=>obj !== marker && obj.type === "player" &&
-        Math.hypot(Number(obj.x)-x,Number(obj.y)-y)<0.025);
-      if (otherPlayers.length) continue;
-      const index = photoObjects.indexOf(marker);
-      if (index < 0) continue;
-      const makePlayer = (label: string, offset: number) => ({
-        type:"player",label,shirtColor:String(marker.shirtColor || "black"),
-        x:Math.max(0.01,Math.min(0.99,x+offset)),y
+      const context = [marker.role, marker.visualType, marker.description]
+        .map(value => String(value ?? "").toLowerCase()).join(" ");
+      const evidence = marker.type === "player" || marker.representsPlayer === true ||
+        /speler|player|shirt|jersey|startpositie/.test(context) ||
+        photoObjects.some(obj => lineTypes.has(String(obj.type)) &&
+          (Math.hypot(Number(obj.x)-x, Number(obj.y)-y) < 0.075 ||
+           Math.hypot(Number(obj.x2)-x, Number(obj.y2)-y) < 0.075));
+      if (!evidence) continue;
+      const nearby = photoObjects.filter(obj => obj !== marker && obj.type === "player" &&
+        Math.hypot(Number(obj.x)-x, Number(obj.y)-y) < 0.035);
+      // Treat existing single shirts as members of this pair, not an excuse
+      // to skip processing; never introduce duplicate labels at the station.
+      const players = marker.type === "player" ? [marker, ...nearby] : nearby;
+      const color = String(players[0]?.shirtColor ?? marker.shirtColor ?? "black");
+      const centerOffset = 0.018;
+      const makePlayer = (label: string, offset: number): Record<string, unknown> => ({
+        type: "player", label, shirtColor: color,
+        x: Math.max(0.01, Math.min(0.99, x + offset)), y,
       });
-      // Both shirts originate from the SAME detected source location.
-      photoObjects.splice(index,1,makePlayer("1",-0.014),makePlayer("2",0.014));
+      const existingOne = players.find(player => String(player.label) === "1");
+      const existingTwo = players.find(player => String(player.label) === "2");
+      const combined = players.find(player => pairLabel(player.label));
+      const targetOne = existingOne ?? combined ?? (players.find(player => !String(player.label ?? "").trim()));
+      if (targetOne) Object.assign(targetOne, {label: "1", x: Math.max(0.01, x-centerOffset), y});
+      else photoObjects.push(makePlayer("1", -centerOffset));
+      if (existingTwo) Object.assign(existingTwo, {x: Math.min(0.99, x+centerOffset), y});
+      else photoObjects.push(makePlayer("2", centerOffset));
+      if (marker.type === "text") {
+        const index = photoObjects.indexOf(marker);
+        if (index >= 0) photoObjects.splice(index, 1);
+      }
     }
     // "Steunspeler" is a caption beside a blue shirt, NOT a separate board
     // object. Shirt numbers remain on the shirt. Keep unrelated drill text.
