@@ -232,7 +232,7 @@ export default function ExerciseBewerkScreen() {
                 throw new Error("Teken eerst de oefening over de foto voordat je opslaat.");
             }
 
-            const currentImageIsOriginal = /\\/exercise-previews\\/imports\\//.test(imageUrl.trim());
+            const currentImageIsOriginal = imageUrl.trim().includes("/exercise-previews/imports/");
             const shouldGenerateBoardPreview = hasBoardItems &&
                 (regenerateBoardPreview || boardChanged || !imageUrl.trim() ||
                  !!tracePhotoUri || currentImageIsOriginal);
