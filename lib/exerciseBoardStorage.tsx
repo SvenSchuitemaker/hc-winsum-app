@@ -93,6 +93,7 @@ export async function uploadExerciseBoardPreview(params: {
     exerciseId: number;
     title: string;
     boardRef: ExerciseBoardEditorRef | null;
+    boardLayout?: ExerciseBoardLayout;
 }) {
     if (!supabase) {
         throw new Error("Supabase is niet geladen.");
