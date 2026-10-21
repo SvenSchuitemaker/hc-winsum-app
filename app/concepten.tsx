@@ -1,3 +1,5 @@
+import { encode } from "base64-arraybuffer";
+import { analyzeExercisePhoto } from "../lib/exercisePhotoImport";
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -23,6 +25,8 @@ export default function ConceptenScreen() {
   const [showExercisePreview, setShowExercisePreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationVersion, setCalibrationVersion] = useState(0);
   const [error, setError] = useState("");
   const editor = useRef<ExerciseBoardEditorRef | null>(null);
 
@@ -46,6 +50,40 @@ export default function ConceptenScreen() {
     setLayout({...concept.board_layout, backgroundImageUrl: concept.source_image_url, backgroundOpacity: 0.65});
     setShowExercisePreview(true);
   }
+  async function recalibrateField() {
+    if (!supabase || !selected?.source_image_url || !layout || calibrating || busy) return;
+    setCalibrating(true);
+    setError("");
+    try {
+      // Recover only geometry for an older concept. Never replace its edited
+      // players, cones, arrows or text with a second AI interpretation.
+      const response = await fetch(selected.source_image_url);
+      if (!response.ok) throw new Error("Originele foto kan niet worden opgehaald.");
+      const imageData = await response.arrayBuffer();
+      if (imageData.byteLength > 5_250_000) throw new Error("Originele foto is te groot om opnieuw te analyseren.");
+      const contentType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+      const mimeType = ["image/jpeg", "image/png", "image/webp"].includes(contentType) ? contentType : "image/jpeg";
+      const analysis = await analyzeExercisePhoto({
+        uri: selected.source_image_url,
+        mimeType,
+        base64: encode(imageData),
+      });
+      const calibration = analysis.field_calibration ?? analysis.board_layout.backgroundCalibration;
+      if (!calibration) throw new Error("AI kon geen veldgrenzen bepalen.");
+      const next = {...layout, backgroundCalibration: calibration};
+      const {error:saveError} = await supabase.from("exercise_concepts")
+        .update({board_layout:{...next,backgroundImageUrl:null}}).eq("id",selected.id).eq("status","ready");
+      if (saveError) throw saveError;
+      setLayout(next);
+      // The editor only hydrates calibration on mount, so reopen the concept
+      // with the saved geometry after the state update.
+      setSelected({...selected, board_layout:{...next,backgroundImageUrl:null}});
+      setCalibrationVersion(version=>version+1);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Veldgrenzen bepalen mislukt.");
+    } finally { setCalibrating(false); }
+  }
+
   async function reject() {
     if (!supabase || !selected || busy) return;
     setBusy(true); setError("");
@@ -141,8 +179,17 @@ export default function ConceptenScreen() {
           </View> : null)}
         </View>}
         <Text style={styles.title}>Bewerkbare AI-tekening</Text>
+        {!layout?.backgroundCalibration && selected?.status==="ready" && (
+          <Pressable style={styles.button} disabled={calibrating || busy}
+            onPress={()=>void recalibrateField()}>
+            <Text style={styles.buttonText}>{calibrating ? "Veld uitsnijden…" : "Veld automatisch uitsnijden"}</Text>
+          </Pressable>
+        )}
+        {!layout?.backgroundCalibration && (
+          <Text style={styles.body}>Dit concept is opgeslagen zonder veldgrenzen. Bepaal deze opnieuw om de foto-overlay correct uit te lijnen.</Text>
+        )}
         <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
-        {layout && <ExerciseBoardEditor key={selected?.id} ref={editor}
+        {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
           value={layout}
           onChange={setLayout}/>}
 
