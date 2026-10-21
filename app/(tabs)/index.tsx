@@ -27,6 +27,7 @@ export default function HomeScreen() {
     const isCompact = width <= 390;
 
     const [categories, setCategories] = useState<DbCategory[]>([]);
+    const [categoryImages, setCategoryImages] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
     const [errorText, setErrorText] = useState("");
 
@@ -42,15 +43,27 @@ export default function HomeScreen() {
                 return;
             }
 
-            const { data, error } = await supabase
-                .from("categories")
-                .select("*")
-                .order("id", { ascending: true });
+            const [{ data, error }, { data: exercises, error: exercisesError }] = await Promise.all([
+                supabase.from("categories").select("*").order("id", { ascending: true }),
+                supabase.from("exercises").select("id, category_slug, image_url").not("image_url", "is", null).order("id", { ascending: false }),
+            ]);
 
             if (error) {
                 setErrorText(error.message);
             } else {
                 setCategories(data || []);
+                if (exercisesError) {
+                    setErrorText(exercisesError.message);
+                    return;
+                }
+                const images: Record<string, string> = {};
+                for (const exercise of exercises || []) {
+                    const url = typeof exercise.image_url === "string" ? exercise.image_url.trim() : "";
+                    if (exercise.category_slug && url && !images[exercise.category_slug]) {
+                        images[exercise.category_slug] = url;
+                    }
+                }
+                setCategoryImages(images);
             }
         } catch (error) {
             setErrorText(error instanceof Error ? error.message : "Onbekende fout");
@@ -109,7 +122,7 @@ export default function HomeScreen() {
                             <ExerciseCard
                                 key={item.id}
                                 title={item.title}
-                                image={item.image_url || "https://picsum.photos/600/400?random=99"}
+                                image={categoryImages[item.slug]}
                                 onPress={() => router.push(`/category/${item.slug}`)}
                             />
                         ))}

@@ -10,7 +10,7 @@ import { COLORS, RADIUS, SPACING } from "../constants/theme";
 
 type Props = {
     title: string;
-    image: string;
+    image?: string;
     onPress: () => void;
 };
 
@@ -28,7 +28,7 @@ export default function ExerciseCard({ title, image, onPress }: Props) {
             onPress={onPress}
         >
             <ImageBackground
-                source={{ uri: image }}
+                source={image ? { uri: image } : undefined}
                 style={[
                     styles.image,
                     isCompact && styles.imageCompact,
