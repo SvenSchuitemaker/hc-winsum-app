@@ -27,6 +27,19 @@ async function captureWebBoard(target: HTMLElement): Promise<string> {
         }
         dest.setAttribute("style", declaration);
     }
+    // The source photo can remain in the live SVG for overlay checking even
+    // when capture mode is switching off. Never serialize external resources:
+    // a single cross-origin SVG <image> taints canvas.toDataURL on Chrome.
+    // Our field, markers, shirts and arrows are local SVG/DOM vector elements.
+    clone.querySelectorAll("image, img, video, canvas, iframe").forEach(node => node.remove());
+    clone.querySelectorAll("*").forEach(node => {
+        const element = node as HTMLElement;
+        if (!element.style) return;
+        for (const property of ["background-image", "mask-image", "-webkit-mask-image", "list-style-image", "border-image-source"]) {
+            const value = element.style.getPropertyValue(property);
+            if (/url\\s*\\(/i.test(value)) element.style.setProperty(property, "none");
+        }
+    });
     clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
     const xml = new XMLSerializer().serializeToString(clone);
     const width = Math.ceil(rect.width), height = Math.ceil(rect.height);
@@ -47,7 +60,11 @@ async function captureWebBoard(target: HTMLElement): Promise<string> {
         if (!context) throw new Error("Canvas is niet beschikbaar.");
         context.scale(2,2);
         context.drawImage(image,0,0,width,height);
-        return canvas.toDataURL("image/png").split(",")[1];
+        try {
+            return canvas.toDataURL("image/png").split(",")[1];
+        } catch {
+            throw new Error("Afbeelding exporteren geblokkeerd door een externe afbeelding. Probeer opnieuw zonder foto-overlay.");
+        }
     } finally { URL.revokeObjectURL(url); }
 }
 
