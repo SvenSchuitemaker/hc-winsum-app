@@ -84,6 +84,32 @@ export default function ConceptenScreen() {
     } finally { setCalibrating(false); }
   }
 
+  function adjustCrop(edge: "left" | "right" | "top" | "bottom", delta: number) {
+    if (!layout) return;
+    const previous = layout.backgroundCalibration ?? {
+      bounds:{left:0,top:0,right:1,bottom:1},rotation:0,flipHorizontal:false,
+    };
+    const bounds = {...previous.bounds};
+    const proposed = Math.max(0,Math.min(1,bounds[edge] + delta));
+    if (edge === "left" && proposed >= bounds.right - 0.18) return;
+    if (edge === "right" && proposed <= bounds.left + 0.18) return;
+    if (edge === "top" && proposed >= bounds.bottom - 0.18) return;
+    if (edge === "bottom" && proposed <= bounds.top + 0.18) return;
+    bounds[edge] = Math.round(proposed*100)/100;
+    setLayout({...layout,backgroundCalibration:{...previous,bounds}});
+    setCalibrationVersion(v=>v+1);
+  }
+  async function saveCrop() {
+    if (!supabase || !selected || !layout) return;
+    setBusy(true);setError("");
+    try {
+      const {error:saveError} = await supabase.from("exercise_concepts")
+        .update({board_layout:{...layout,backgroundImageUrl:null}})
+        .eq("id",selected.id).eq("status","ready");
+      if (saveError) throw saveError;
+    } catch(e) {setError(e instanceof Error ? e.message : "Uitsnede opslaan mislukt.");}
+    finally {setBusy(false);}
+  }
   async function reject() {
     if (!supabase || !selected || busy) return;
     setBusy(true); setError("");
@@ -188,6 +214,22 @@ export default function ConceptenScreen() {
         {!layout?.backgroundCalibration && (
           <Text style={styles.body}>Dit concept is opgeslagen zonder veldgrenzen. Bepaal deze opnieuw om de foto-overlay correct uit te lijnen.</Text>
         )}
+        {!!selected?.source_image_url && selected.status==="ready" && <View style={styles.previewCard}>
+          <Text style={styles.title}>Foto uitsnijden naar het hockeyveld</Text>
+          <Text style={styles.body}>Stel de vier randen bij totdat uitsluitend het veld uit de boekfoto zichtbaar is. De AI-tekening verandert niet.</Text>
+          {(["left","right","top","bottom"] as const).map(edge=><View key={edge} style={styles.cropRow}>
+            <Text style={[styles.body,{width:67}]}>{({left:"Links",right:"Rechts",top:"Boven",bottom:"Onder"})[edge]}</Text>
+            <Pressable style={styles.cropButton} onPress={()=>adjustCrop(edge,edge==="right"||edge==="bottom"?-0.03:0.03)}>
+              <Text style={styles.buttonText}>Meer</Text>
+            </Pressable>
+            <Pressable style={styles.cropButton} onPress={()=>adjustCrop(edge,edge==="right"||edge==="bottom"?0.03:-0.03)}>
+              <Text style={styles.buttonText}>Minder</Text>
+            </Pressable>
+          </View>)}
+          <Pressable style={styles.button} disabled={busy} onPress={()=>void saveCrop()}>
+            <Text style={styles.buttonText}>Uitsnede bewaren</Text>
+          </Pressable>
+        </View>}
         <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
         {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
           value={layout}
@@ -221,6 +263,8 @@ const styles=StyleSheet.create({
  badges:{flexDirection:"row",flexWrap:"wrap",gap:8},
  badge:{color:COLORS.accent,backgroundColor:COLORS.surfaceLight,padding:9,borderRadius:RADIUS.pill,overflow:"hidden"},
  detailSection:{padding:SPACING.md,backgroundColor:COLORS.surfaceLight,borderRadius:RADIUS.md,gap:8},
+ cropRow:{flexDirection:"row",alignItems:"center",gap:8},
+ cropButton:{flex:1,backgroundColor:COLORS.primary,borderRadius:RADIUS.md,padding:10,alignItems:"center"},
  overlayButtons:{flexDirection:"row",gap:10},
  smallButton:{flex:1,backgroundColor:COLORS.primary,borderRadius:RADIUS.md,padding:12,alignItems:"center"},
  thumb:{height:110,width:"100%"},
