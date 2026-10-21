@@ -266,7 +266,7 @@ export default function NieuweOefeningenScreen() {
                     const {error}=await backend.from("exercise_concepts").insert({
                         user_id:uid,title:String(metadata.title||drawing.title||file).trim(),
                         category_slug:slug,source_image_url:sourceImageUrl,
-                        board_layout:{...drawing.board_layout,backgroundImageUrl:null},
+                        board_layout:{...drawing.board_layout,backgroundImageUrl:null,backgroundCalibration:drawing.field_calibration ?? drawing.board_layout.backgroundCalibration},
                         subtitle:metadata.subtitle||drawing.subtitle||null,
                         explanation:metadata.explanation||drawing.explanation||null,
                         instructions:metadata.instructions||drawing.instructions||null,
