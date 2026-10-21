@@ -17,10 +17,10 @@ async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout)
     if (!rect.width || !rect.height) throw new Error("Het tekenveld is nog niet zichtbaar.");
     const width = Math.ceil(rect.width), height = Math.ceil(rect.height);
     const canvas = document.createElement("canvas");
-    canvas.width = width * 2; canvas.height = height * 2;
+    canvas.width = width * 3; canvas.height = height * 3;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas niet beschikbaar.");
-    context.scale(2, 2);
+    context.scale(3, 3);
     // Render only native SVG primitives. foreignObject is not origin-clean
     // in mobile browsers, even after removing all external images.
     const vector = board.cloneNode(true) as SVGSVGElement;
@@ -59,9 +59,21 @@ async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout)
             context.strokeStyle = item.shirtColor === "white" ? "#555" : "#ECECEC";
             context.lineWidth = 0.85;
             context.fill(path); context.stroke(path);
-            context.font = "900 7px Arial"; context.textAlign = "center";
-            context.fillStyle = ["white","orange","grey"].includes(item.shirtColor || "") ? "#111" : "#FFF";
-            context.fillText(String(itemLabels[item.id] ?? item.label ?? (item.type === "trainer" ? "T" : "")),11,16);
+            // Draw the visible jersey label into the uploaded PNG as real
+            // canvas text. At thumbnail sizes a 7px label can vanish after scaling.
+            const jerseyLabel = String(item.label?.trim() || itemLabels[item.id] || (item.type === "trainer" ? "T" : ""));
+            if (jerseyLabel) {
+                const isLightShirt = ["white", "orange", "grey"].includes(item.shirtColor || "");
+                context.font = `900 ${jerseyLabel.length > 3 ? 6 : jerseyLabel.length > 2 ? 7 : 9}px Arial, sans-serif`;
+                context.textAlign = "center";
+                context.textBaseline = "middle";
+                context.lineJoin = "round";
+                context.strokeStyle = isLightShirt ? "#FFFFFF" : "#111111";
+                context.lineWidth = 1.7;
+                context.strokeText(jerseyLabel, 11, 13.5, 13);
+                context.fillStyle = isLightShirt ? "#111111" : "#FFFFFF";
+                context.fillText(jerseyLabel, 11, 13.5, 13);
+            }
         } else if (item.type === "cone") {
             context.fillStyle = "#FF8A3D"; context.beginPath();
             context.moveTo(0,-7); context.lineTo(-6,5); context.lineTo(6,5); context.closePath(); context.fill();
