@@ -209,37 +209,62 @@ export default function NieuweOefeningenScreen() {
 
     async function bulkImportPhotos() {
         if (!isSuperAdmin || !user?.id || !supabase || analyzing || loading) return;
+        const backend = supabase;
+        const uid = user.id;
         setImportError("");
         setBulkResults([]);
+        setBulkProgress("");
+        // Supabase errors may be plain objects rather than Error instances.
+        const errorMessage = (error: unknown): string => {
+            if (error instanceof Error) return error.message;
+            if (error && typeof error === "object") {
+                const e = error as { message?: unknown; details?: unknown; code?: unknown; hint?: unknown };
+                const message = [e.message, e.details, e.hint].filter(v => typeof v === "string" && v).join(" — ");
+                if (message) return [message, e.code ? "(" + e.code + ")" : ""].filter(Boolean).join(" ");
+            }
+            return typeof error === "string" ? error : "Onbekende fout.";
+        };
         let photos: SelectedExercisePhoto[];
         try { photos = await selectExercisePhotos(); }
-        catch (error) { setImportError(error instanceof Error ? error.message : "Selecteren mislukt."); return; }
+        catch (error) { setImportError(errorMessage(error)); return; }
         if (!photos.length) return;
         setAnalyzing(true);
         const results: Array<{file:string;status:"toegevoegd"|"overgeslagen"|"fout";details:string;id?:number}> = [];
         try {
+            // Check the new database migration BEFORE spending Gemini tokens.
+            const { error:conceptTableError } = await backend.from("exercise_concepts").select("id").limit(1);
+            if (conceptTableError) {
+                throw new Error("Concepten zijn nog niet beschikbaar in Supabase: " +
+                    errorMessage(conceptTableError) +
+                    ". Voer de migratie 20261021121900_exercise_concepts.sql uit en probeer opnieuw.");
+            }
             for (let i = 0; i < photos.length; i++) {
                 const photo = photos[i], file = "Foto " + (i + 1);
+                let stage = "Bestand controleren";
                 setBulkProgress("AI tekent " + (i + 1) + " van " + photos.length + "…");
                 try {
                     if (!["image/jpeg","image/png","image/webp"].includes(photo.mimeType) ||
                         photo.base64.length < 20 || photo.base64.length > 7_000_000)
                         throw new Error("Ongeldig fotoformaat of groter dan 5 MB.");
+                    stage = "Gemini-tekening";
                     const drawing = await analyzeExercisePhoto(photo);
                     if (!drawing.board_layout.items.length) throw new Error("Geen tekenobjecten herkend.");
                     let metadata: Record<string, any> = {};
+                    stage = "Tekstherkenning";
                     try {
-                        const {data,error} = await supabase.functions.invoke("read-exercise-text", {
+                        const {data,error} = await backend.functions.invoke("read-exercise-text", {
                             body:{mimeType:photo.mimeType,base64:photo.base64}
                         });
                         if (!error && data && !data.error) metadata=data;
-                    } catch { /* Drawing can still be reviewed without metadata. */ }
+                    } catch { /* Keep the drawing when metadata extraction fails. */ }
                     const slug = categories.some(c=>c.slug===metadata.category_slug)
                         ? String(metadata.category_slug) : categorySlug;
                     if (!slug) throw new Error("Geen categorie beschikbaar.");
-                    const sourceImageUrl=await uploadExercisePhoto(photo,user.id);
-                    const {error}=await supabase.from("exercise_concepts").insert({
-                        user_id:user.id,title:String(metadata.title||drawing.title||file).trim(),
+                    stage = "Originele foto uploaden";
+                    const sourceImageUrl=await uploadExercisePhoto(photo,uid);
+                    stage = "Privéconcept opslaan";
+                    const {error}=await backend.from("exercise_concepts").insert({
+                        user_id:uid,title:String(metadata.title||drawing.title||file).trim(),
                         category_slug:slug,source_image_url:sourceImageUrl,
                         board_layout:{...drawing.board_layout,backgroundImageUrl:null},
                         subtitle:metadata.subtitle||drawing.subtitle||null,
@@ -253,12 +278,26 @@ export default function NieuweOefeningenScreen() {
                     if(error)throw error;
                     results.push({file,status:"toegevoegd",details:"Concept: "+String(metadata.title||drawing.title||file)});
                 } catch(error) {
-                    results.push({file,status:"fout",details:error instanceof Error?error.message:"Analyse mislukt."});
+                    const message = stage + ": " + errorMessage(error);
+                    results.push({file,status:"fout",details:message});
+                    // Authorization, missing table and storage configuration errors
+                    // cannot be fixed by trying another image. Avoid repeated costs.
+                    const code = error && typeof error === "object" && "code" in error
+                        ? String((error as {code?:unknown}).code ?? "") : "";
+                    if (["42P01","42501","PGRST205","PGRST204","PGRST116"].includes(code) ||
+                        /row.level.security|permission denied|relation .* does not exist|schema cache/i.test(message)) {
+                        setBulkResults([...results]);
+                        setImportError("Import gestopt: " + message);
+                        break;
+                    }
                 }
                 setBulkResults([...results]);
             }
             setBulkProgress("Klaar: "+results.filter(r=>r.status==="toegevoegd").length+" concepten, "+
                 results.filter(r=>r.status==="fout").length+" mislukt.");
+        } catch(error) {
+            setImportError(errorMessage(error));
+            setBulkProgress("Import niet gestart. Er zijn geen nieuwe AI-analyses uitgevoerd.");
         } finally {setAnalyzing(false);}
     }
 
