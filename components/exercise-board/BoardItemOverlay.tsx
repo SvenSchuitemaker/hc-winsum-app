@@ -88,7 +88,7 @@ export default function BoardItemOverlay({
                                 ["white", "orange", "grey"].includes(jerseyColor ?? "") && { color: "#111111" },
                             ]}
                         >
-                            {item.type === "player" ? (item.label ?? "") : (label ?? (item.type === "trainer" ? "T" : ""))}
+                            {item.type === "player" ? (label ?? item.label ?? "") : (label ?? (item.type === "trainer" ? "T" : ""))}
                         </Text>
                     </View>
                 )}
