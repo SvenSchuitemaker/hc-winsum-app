@@ -232,10 +232,10 @@ export default function ExerciseBewerkScreen() {
                 throw new Error("Teken eerst de oefening over de foto voordat je opslaat.");
             }
 
-            const currentImageIsOriginal = imageUrl.trim().includes("/exercise-previews/imports/");
-            const shouldGenerateBoardPreview = hasBoardItems &&
-                (regenerateBoardPreview || boardChanged || !imageUrl.trim() ||
-                 !!tracePhotoUri || currentImageIsOriginal);
+            // A saved image may have been rendered by an older, buggy exporter.
+            // Always regenerate from the editable board on save, even when no item
+            // was moved. Otherwise the old PNG (without jersey labels) persists.
+            const shouldGenerateBoardPreview = hasBoardItems;
             let nextImageUrl = imageUrl.trim() || null;
             if (shouldGenerateBoardPreview) {
                 if (!boardPreviewRef.current) {
