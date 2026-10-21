@@ -192,10 +192,9 @@ export default function ConceptenScreen() {
         <Text style={styles.title}>{c.title}</Text>
         <Text style={styles.body}>{c.category_slug} · {c.status==="ready"?"Wacht op controle":c.status==="approved"?"Goedgekeurd":"Afgewezen"}</Text>
         {c.source_image_url && <Image source={{uri:c.source_image_url}} style={styles.thumb} resizeMode="contain"/>}
-        {c.status==="rejected" ? <Pressable style={styles.deleteButton} disabled={busy}
+        {c.status==="rejected" ? <Pressable style={styles.deleteButton} disabled={busy} accessibilityRole="button" accessibilityLabel="Afgewezen concept verwijderen"
           onPress={(event)=>{event.stopPropagation();void deleteRejected(c);}}>
-          <Ionicons name="trash-outline" size={17} color="#FFFFFF"/>
-          <Text style={styles.buttonText}>Afgewezen concept verwijderen</Text>
+          <Ionicons name="trash-outline" size={20} color="#FFFFFF"/>
         </Pressable> : <Text style={styles.link}>Bekijk tekening →</Text>}
       </Pressable>)}
       </View>
@@ -289,7 +288,7 @@ export default function ConceptenScreen() {
 }
 const styles=StyleSheet.create({
  root:{flex:1,backgroundColor:COLORS.background},
- deleteButton:{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:8,padding:12,borderRadius:RADIUS.md,backgroundColor:"#9B3440"},
+ deleteButton:{alignSelf:"flex-end",width:44,height:44,alignItems:"center",justifyContent:"center",borderRadius:RADIUS.md,backgroundColor:"#9B3440"},
  desktopModalContent:{width:"100%",maxWidth:1480,alignSelf:"center",paddingHorizontal:24},
  reviewColumns:{gap:18},
  reviewColumnsDesktop:{flexDirection:"row",alignItems:"flex-start",gap:28},
