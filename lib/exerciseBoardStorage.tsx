@@ -9,65 +9,85 @@ const BUCKET_NAME = "exercise-previews";
 // React Native ViewShot calls findNodeHandle and cannot capture DOM nodes on
 // React Native Web. Rasterize the actual board DOM instead, including its SVG
 // field, player jerseys and arrows, without the reference-photo overlay.
-async function captureWebBoard(target: HTMLElement): Promise<string> {
-    const rect = target.getBoundingClientRect();
-    if (!rect.width || !rect.height) throw new Error("Het tekenbord is nog niet zichtbaar.");
-    const clone = target.cloneNode(true) as HTMLElement;
-    const originalNodes = [target, ...Array.from(target.querySelectorAll("*"))];
-    const clonedNodes = [clone, ...Array.from(clone.querySelectorAll("*"))];
-    for (let i = 0; i < originalNodes.length; i++) {
-        const source = originalNodes[i] as Element;
-        const dest = clonedNodes[i] as HTMLElement;
-        if (!dest?.style) continue;
-        const computed = window.getComputedStyle(source);
-        let declaration = "";
-        for (let j = 0; j < computed.length; j++) {
-            const property = computed[j];
-            declaration += property + ":" + computed.getPropertyValue(property) + ";";
-        }
-        dest.setAttribute("style", declaration);
-    }
-    // The source photo can remain in the live SVG for overlay checking even
-    // when capture mode is switching off. Never serialize external resources:
-    // a single cross-origin SVG <image> taints canvas.toDataURL on Chrome.
-    // Our field, markers, shirts and arrows are local SVG/DOM vector elements.
-    clone.querySelectorAll("image, img, video, canvas, iframe").forEach(node => node.remove());
-    clone.querySelectorAll("*").forEach(node => {
-        const element = node as HTMLElement;
-        if (!element.style) return;
-        for (const property of ["background-image", "mask-image", "-webkit-mask-image", "list-style-image", "border-image-source"]) {
-            const value = element.style.getPropertyValue(property);
-            if (/url\\s*\\(/i.test(value)) element.style.setProperty(property, "none");
-        }
-    });
-    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-    const xml = new XMLSerializer().serializeToString(clone);
+async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout): Promise<string> {
+    const board = target.querySelector("svg");
+    if (!board) throw new Error("Geen SVG-tekenveld gevonden.");
+    const rect = board.getBoundingClientRect();
+    if (!rect.width || !rect.height) throw new Error("Het tekenveld is nog niet zichtbaar.");
     const width = Math.ceil(rect.width), height = Math.ceil(rect.height);
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width +
-      '" height="' + height + '"><foreignObject width="100%" height="100%">' +
-      xml + '</foreignObject></svg>';
-    const url = URL.createObjectURL(new Blob([svg],{type:"image/svg+xml;charset=utf-8"}));
+    const canvas = document.createElement("canvas");
+    canvas.width = width * 2; canvas.height = height * 2;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas niet beschikbaar.");
+    context.scale(2, 2);
+    // Render only native SVG primitives. foreignObject is not origin-clean
+    // in mobile browsers, even after removing all external images.
+    const vector = board.cloneNode(true) as SVGSVGElement;
+    vector.querySelectorAll("image, foreignObject, script").forEach(node => node.remove());
+    vector.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    vector.setAttribute("width", String(width));
+    vector.setAttribute("height", String(height));
+    const source = new XMLSerializer().serializeToString(vector);
+    const imageUrl = URL.createObjectURL(new Blob([source], {type: "image/svg+xml;charset=utf-8"}));
     try {
         const image = new Image();
-        await new Promise<void>((resolve,reject)=>{
-            image.onload=()=>resolve();
-            image.onerror=()=>reject(new Error("Canvas kon niet worden gerenderd."));
-            image.src=url;
+        await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error("Veldlijnen kunnen niet worden gerenderd."));
+            image.src = imageUrl;
         });
-        const canvas = document.createElement("canvas");
-        canvas.width=width*2; canvas.height=height*2;
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("Canvas is niet beschikbaar.");
-        context.scale(2,2);
-        context.drawImage(image,0,0,width,height);
-        try {
-            return canvas.toDataURL("image/png").split(",")[1];
-        } catch {
-            throw new Error("Afbeelding exporteren geblokkeerd door een externe afbeelding. Probeer opnieuw zonder foto-overlay.");
+        context.drawImage(image, 0, 0, width, height);
+    } finally {
+        URL.revokeObjectURL(imageUrl);
+    }
+    const shirtColors: Record<string,string> = {
+        black:"#171717", orange:"#F39A25", blue:"#199ED8", grey:"#A5A5A5",
+        white:"#F5F5F5", red:"#D93945", green:"#2EAD72",
+    };
+    const path = new Path2D("M 7 2.5 L 9 3.7 Q 11 5.3 13 3.7 L 15 2.5 L 21 6.5 L 18 12 L 15.9 10.9 L 15.9 20 L 6.1 20 L 6.1 10.9 L 4 12 L 1 6.5 Z");
+    for (const item of layout.items) {
+        if (["passLine","runLine","guideLine"].includes(item.type)) continue;
+        const x = item.x * width, y = item.y * height;
+        context.save(); context.translate(x, y);
+        const shirt = item.type === "player" ||
+            (["attacker","defender","trainer"].includes(item.type) && !!item.shirtColor);
+        if (shirt) {
+            context.translate(-11,-11);
+            context.fillStyle = shirtColors[item.shirtColor || "blue"] || shirtColors.blue;
+            context.strokeStyle = item.shirtColor === "white" ? "#555" : "#ECECEC";
+            context.lineWidth = 0.85;
+            context.fill(path); context.stroke(path);
+            context.font = "900 7px Arial"; context.textAlign = "center";
+            context.fillStyle = ["white","orange","grey"].includes(item.shirtColor || "") ? "#111" : "#FFF";
+            context.fillText(String(item.label || (item.type === "trainer" ? "T" : "")),11,16);
+        } else if (item.type === "cone") {
+            context.fillStyle = "#FF8A3D"; context.beginPath();
+            context.moveTo(0,-7); context.lineTo(-6,5); context.lineTo(6,5); context.closePath(); context.fill();
+        } else if (item.type === "ball") {
+            context.beginPath(); context.arc(0,0,4.5,0,Math.PI*2);
+            context.fillStyle="#FFF"; context.fill();context.strokeStyle="#111";context.lineWidth=1.5;context.stroke();
+        } else if (item.type === "hat") {
+            context.beginPath();context.arc(0,0,6,0,Math.PI*2);
+            context.fillStyle=shirtColors[item.color || "orange"] || "#FFD166";context.fill();
+        } else if (item.type === "text") {
+            context.font="700 10px Arial";context.textAlign="center";context.fillStyle="#FFF";
+            context.fillText(String(item.text || ""),0,0);
+        } else if (item.type === "goal") {
+            context.rotate((item.rotation || 0)*Math.PI/180);
+            context.strokeStyle="#FFF";context.lineWidth=2;
+            context.beginPath();context.moveTo(-10,-7);context.lineTo(-10,7);
+            context.lineTo(10,7);context.lineTo(10,-7);context.stroke();
+        } else {
+            context.beginPath();context.arc(0,0,9,0,Math.PI*2);
+            context.fillStyle=item.type==="defender"?"#FF5A5F":item.type==="trainer"?"#FFF":"#1735FF";
+            context.fill();context.fillStyle=item.type==="trainer"?"#1B3555":"#FFF";
+            context.font="900 7px Arial";context.textAlign="center";
+            context.fillText(String(item.label||""),0,2.5);
         }
-    } finally { URL.revokeObjectURL(url); }
+        context.restore();
+    }
+    return canvas.toDataURL("image/png").split(",")[1];
 }
-
 
 export async function uploadExerciseBoardPreview(params: {
     exerciseId: number;
@@ -91,7 +111,8 @@ export async function uploadExerciseBoardPreview(params: {
     try {
         await new Promise((resolve) => setTimeout(resolve, 220));
         if (Platform.OS === "web") {
-            base64 = await captureWebBoard(captureTarget as unknown as HTMLElement);
+            if (!params.boardLayout) throw new Error("Tekenbordgegevens ontbreken voor web-export.");
+            base64 = await captureWebBoard(captureTarget as unknown as HTMLElement, params.boardLayout);
         } else {
             const uri = await captureRef(captureTarget, {
                 format: "png", quality: 1, result: "tmpfile",
