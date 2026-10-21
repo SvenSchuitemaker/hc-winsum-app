@@ -444,7 +444,7 @@ export default function NieuweOefeningenScreen() {
                 .insert({
                     category_slug: categorySlug,
                     title: title.trim(),
-                    image_url: savedImageUrl,
+                    image_url: hasBoardItems ? null : savedImageUrl,
                     subtitle: subtitle.trim() || null,
                     explanation: explanation.trim() || null,
                     instructions: instructions.trim() || null,
@@ -463,33 +463,33 @@ export default function NieuweOefeningenScreen() {
 
             if (insertError) throw insertError;
 
-            let previewFailed = false;
-            // For AI tracing and manual drawings, the captured editable canvas is the saved image.
-            // Preserve the original uploaded photo as a fallback if preview generation fails.
-            if (hasBoardItems && insertedExercise?.id && boardPreviewRef.current) {
+            // Never mark a drawn exercise as saved if its generated image failed.
+            if (hasBoardItems && insertedExercise?.id) {
                 try {
+                    if (!boardPreviewRef.current) throw new Error("Het tekenbord is nog niet gereed.");
                     const previewUrl = await uploadExerciseBoardPreview({
                         exerciseId: insertedExercise.id,
                         title: title.trim(),
                         boardRef: boardPreviewRef.current,
+                        boardLayout,
                     });
-
+                    if (!previewUrl || previewUrl.includes("/imports/"))
+                        throw new Error("De getekende bordafbeelding ontbreekt.");
                     const { error: updateError } = await supabase
-                        .from("exercises")
-                        .update({ image_url: previewUrl })
+                        .from("exercises").update({ image_url: previewUrl })
                         .eq("id", insertedExercise.id);
-
                     if (updateError) throw updateError;
-                } catch {
-                    // The exercise already exists: keep its original photo, when available.
-                    previewFailed = true;
+                } catch (previewError) {
+                    const { error: rollbackError } = await supabase
+                        .from("exercises").delete().eq("id", insertedExercise.id);
+                    if (rollbackError)
+                        throw new Error("Bordpreview mislukt en het terugdraaien van de oefening mislukte: " + rollbackError.message);
+                    throw previewError;
                 }
             }
 
             resetForm();
-            setFormSuccess(previewFailed
-                ? "Oefening opgeslagen, maar de bordpreview kon niet worden gemaakt. Open de oefening om de afbeelding te controleren."
-                : "De oefening is toegevoegd aan de bibliotheek.");
+            setFormSuccess("De oefening is toegevoegd aan de bibliotheek.");
         } catch (error) {
             setFormError(error instanceof Error ? error.message : "Opslaan mislukt.");
         } finally {
