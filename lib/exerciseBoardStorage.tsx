@@ -4,6 +4,7 @@ import { captureRef } from "react-native-view-shot";
 import { Platform } from "react-native";
 import type { ExerciseBoardEditorRef, ExerciseBoardLayout } from "../components/exercise-board/boardTypes";
 import { supabase } from "./supabase";
+import { buildItemLabels } from "../components/exercise-board/boardUtils";
 
 const BUCKET_NAME = "exercise-previews";
 // React Native ViewShot calls findNodeHandle and cannot capture DOM nodes on
@@ -45,6 +46,7 @@ async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout)
         white:"#F5F5F5", red:"#D93945", green:"#2EAD72",
     };
     const path = new Path2D("M 7 2.5 L 9 3.7 Q 11 5.3 13 3.7 L 15 2.5 L 21 6.5 L 18 12 L 15.9 10.9 L 15.9 20 L 6.1 20 L 6.1 10.9 L 4 12 L 1 6.5 Z");
+    const itemLabels = buildItemLabels(layout.items);
     for (const item of layout.items) {
         if (["passLine","runLine","guideLine"].includes(item.type)) continue;
         const x = item.x * width, y = item.y * height;
@@ -59,7 +61,7 @@ async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout)
             context.fill(path); context.stroke(path);
             context.font = "900 7px Arial"; context.textAlign = "center";
             context.fillStyle = ["white","orange","grey"].includes(item.shirtColor || "") ? "#111" : "#FFF";
-            context.fillText(String(item.label || (item.type === "trainer" ? "T" : "")),11,16);
+            context.fillText(String(itemLabels[item.id] ?? item.label ?? (item.type === "trainer" ? "T" : "")),11,16);
         } else if (item.type === "cone") {
             context.fillStyle = "#FF8A3D"; context.beginPath();
             context.moveTo(0,-7); context.lineTo(-6,5); context.lineTo(6,5); context.closePath(); context.fill();
