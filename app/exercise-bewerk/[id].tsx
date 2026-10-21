@@ -232,19 +232,24 @@ export default function ExerciseBewerkScreen() {
                 throw new Error("Teken eerst de oefening over de foto voordat je opslaat.");
             }
 
-            const shouldGenerateBoardPreview =
-                hasBoardItems &&
-                !!boardPreviewRef.current &&
-                (regenerateBoardPreview || boardChanged || !imageUrl.trim() || !!tracePhotoUri);
-
+            const currentImageIsOriginal = /\\/exercise-previews\\/imports\\//.test(imageUrl.trim());
+            const shouldGenerateBoardPreview = hasBoardItems &&
+                (regenerateBoardPreview || boardChanged || !imageUrl.trim() ||
+                 !!tracePhotoUri || currentImageIsOriginal);
             let nextImageUrl = imageUrl.trim() || null;
-
             if (shouldGenerateBoardPreview) {
+                if (!boardPreviewRef.current) {
+                    throw new Error("Het tekenbord is nog niet klaar. Probeer opnieuw na het laden.");
+                }
                 nextImageUrl = await uploadExerciseBoardPreview({
                     exerciseId: Number(id),
                     title: title.trim(),
                     boardRef: boardPreviewRef.current,
+                    boardLayout,
                 });
+                if (!nextImageUrl || nextImageUrl.includes("/imports/")) {
+                    throw new Error("De getekende veldafbeelding kon niet worden opgeslagen.");
+                }
             }
 
             const { error } = await supabase
