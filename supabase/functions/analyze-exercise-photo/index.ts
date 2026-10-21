@@ -202,7 +202,7 @@ function normalizePrintedEquipment(raw: unknown): Record<string, unknown> | null
 function promotePrintedPlayers(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   const distance = (a: Record<string, unknown>, b: Record<string, unknown>) =>
     Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
-  const numeric = (v: unknown) => /^([1-9][0-9]?)\\.?$/.exec(String(v ?? "").trim());
+  const numeric = (v: unknown) => /^([1-9][0-9]?)\.?$/.exec(String(v ?? "").trim());
   const actors = items.filter(i => ["player", "attacker", "defender", "trainer"].includes(String(i.type)));
   return items.flatMap(item => {
     if (item.type !== "text") return [item];
@@ -279,7 +279,7 @@ async function recoverPrintedCones(key: string, model: string, mimeType: string,
     }
     const numberedPlayers: Record<string, unknown>[] = [];
     for (const raw of (Array.isArray(parsed.numberedPlayers) ? parsed.numberedPlayers : []).slice(0, 50)) {
-      const label = /^([1-9][0-9]?)\\.?$/.exec(String(raw?.label ?? "").trim());
+      const label = /^([1-9][0-9]?)\.?$/.exec(String(raw?.label ?? "").trim());
       const x = Number(raw?.x), y = Number(raw?.y);
       if (!label || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
       if (numberedPlayers.some(previous => previous.label === label[1] && Math.hypot(Number(previous.x)-x,Number(previous.y)-y) < 0.025)) continue;
@@ -1159,7 +1159,7 @@ JSON items: {type,x,y,x2?,y2?,lineStyle?,color?,rotation?,shirtColor?,label?,tex
       const nearby = photoObjects.filter(obj => sourceDistance(obj, candidate) < 0.11);
       const matchingText = nearby
         .filter(obj => obj.type === "text" &&
-          /^([1-9][0-9]?)\\.?$/.exec(String(obj.text ?? "").trim())?.[1] === number)
+          /^([1-9][0-9]?)\.?$/.exec(String(obj.text ?? "").trim())?.[1] === number)
         .sort((a,b) => sourceDistance(a,candidate)-sourceDistance(b,candidate));
       const existing = nearby.filter(obj => obj.type === "player" &&
         sourceDistance(obj,candidate) < 0.045)
