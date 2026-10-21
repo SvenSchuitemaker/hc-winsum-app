@@ -10,6 +10,7 @@ import {
     Text,
     TextInput,
     View,
+    useWindowDimensions,
 } from "react-native";
 import ExerciseBoardEditor, {
     type ExerciseBoardEditorRef,
@@ -49,6 +50,8 @@ const audienceOptions = [
 
 export default function NieuweOefeningenScreen() {
     const { role, user } = useAuth();
+    const { width: windowWidth } = useWindowDimensions();
+    const isDesktop = windowWidth >= 1100;
     const isSuperAdmin = role === "super_admin";
     const boardPreviewRef = useRef<ExerciseBoardEditorRef | null>(null);
 
@@ -517,7 +520,9 @@ export default function NieuweOefeningenScreen() {
     }
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <ScrollView style={styles.container} contentContainerStyle={[styles.content, isDesktop && styles.desktopContent]}>
+            <View style={[styles.workspace, isDesktop && styles.desktopWorkspace]}>
+            <View style={[styles.formColumn, isDesktop && styles.desktopFormColumn]}>
             <View style={styles.card}>
                 <Text style={styles.title}>Nieuwe oefening toevoegen</Text>
                 {!!formSuccess && <Text style={styles.successText}>{formSuccess}</Text>}
@@ -761,12 +766,16 @@ export default function NieuweOefeningenScreen() {
                 </View>
             </View>
 
-            <ExerciseBoardEditor
-                key={boardVersion}
-                ref={boardPreviewRef}
-                value={boardLayout}
-                onChange={setBoardLayout}
-            />
+            </View>
+            <View style={[styles.boardColumn, isDesktop && styles.desktopBoardColumn]}>
+                <ExerciseBoardEditor
+                    key={boardVersion}
+                    ref={boardPreviewRef}
+                    value={boardLayout}
+                    onChange={setBoardLayout}
+                />
+            </View>
+            </View>
 
             <View style={styles.card}>
                 {!!formError && <Text style={styles.importError}>{formError}</Text>}
@@ -793,6 +802,13 @@ const styles = StyleSheet.create({
     successText: { color: "#74D49B", fontSize: 14, fontWeight: "700", marginBottom: SPACING.md },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+    desktopContent: { width: "100%", maxWidth: 1480, alignSelf: "center", paddingHorizontal: 24, paddingTop: 24 },
+    workspace: { gap: SPACING.md },
+    desktopWorkspace: { flexDirection: "row-reverse", alignItems: "flex-start", gap: 24 },
+    formColumn: { width: "100%" },
+    desktopFormColumn: { flex: 1, width: undefined, minWidth: 0 },
+    boardColumn: { width: "100%" },
+    desktopBoardColumn: { width: 620, maxWidth: "48%", flexShrink: 1 },
     center: {
         flex: 1,
         backgroundColor: COLORS.background,
