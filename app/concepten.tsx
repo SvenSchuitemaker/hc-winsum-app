@@ -134,7 +134,7 @@ export default function ConceptenScreen() {
       // A concept never becomes public without a successfully rendered preview.
       const {data:created,error:insertError}=await supabase.from("exercises").insert({
         title:selected.title,category_slug:selected.category_slug,
-        image_url:selected.source_image_url,subtitle:selected.subtitle,
+        image_url:null,subtitle:selected.subtitle,
         explanation:selected.explanation,instructions:selected.instructions,
         simplify:selected.simplify,build_up:selected.build_up,
         difficulty:selected.difficulty,audience:selected.audience,
@@ -145,6 +145,7 @@ export default function ConceptenScreen() {
         const image=await uploadExerciseBoardPreview({
           exerciseId:created.id,title:selected.title,boardRef:editor.current,boardLayout:layout,
         });
+        if (!image || image.includes("/imports/")) throw new Error("Geen getekende bordafbeelding ontvangen.");
         const {error:imageError}=await supabase.from("exercises").update({image_url:image}).eq("id",created.id);
         if(imageError) throw imageError;
       } catch(e) {
