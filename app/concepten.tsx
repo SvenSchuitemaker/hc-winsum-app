@@ -20,8 +20,6 @@ export default function ConceptenScreen() {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [selected, setSelected] = useState<Concept | null>(null);
   const [layout, setLayout] = useState<ExerciseBoardLayout | null>(null);
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [overlayOpacity, setOverlayOpacity] = useState(0.65);
   const [showExercisePreview, setShowExercisePreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -43,9 +41,9 @@ export default function ConceptenScreen() {
 
   function open(concept: Concept) {
     setError(""); setSelected(concept);
-    setLayout({...concept.board_layout, backgroundImageUrl: null});
-    setShowOverlay(false);
-    setOverlayOpacity(0.65);
+    // Hydrate the editor with the original photo from the start so its
+    // built-in overlay buttons are available immediately above the preview.
+    setLayout({...concept.board_layout, backgroundImageUrl: concept.source_image_url, backgroundOpacity: 0.65});
     setShowExercisePreview(true);
   }
   async function reject() {
@@ -143,20 +141,11 @@ export default function ConceptenScreen() {
           </View> : null)}
         </View>}
         <Text style={styles.title}>Bewerkbare AI-tekening</Text>
-        <Text style={styles.body}>De foto-overlay is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
-        <Pressable style={styles.button} onPress={()=>setShowOverlay(value=>!value)}>
-          <Text style={styles.buttonText}>{showOverlay ? "Verberg foto-overlay" : "Toon foto-overlay"}</Text>
-        </Pressable>
-        {showOverlay && <>
-          <Text style={styles.body}>Foto: {Math.round(overlayOpacity*100)}% zichtbaar</Text>
-          <View style={styles.overlayButtons}>
-            <Pressable style={styles.smallButton} onPress={()=>setOverlayOpacity(value=>Math.max(0.15,Math.round((value-0.1)*100)/100))}><Text style={styles.buttonText}>−</Text></Pressable>
-            <Pressable style={styles.smallButton} onPress={()=>setOverlayOpacity(value=>Math.min(1,Math.round((value+0.1)*100)/100))}><Text style={styles.buttonText}>+</Text></Pressable>
-          </View>
-        </>}
+        <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
         {layout && <ExerciseBoardEditor key={selected?.id} ref={editor}
-          value={{...layout,backgroundImageUrl:showOverlay ? selected?.source_image_url : null,backgroundOpacity:overlayOpacity}}
-          onChange={nextLayout=>setLayout({...nextLayout,backgroundImageUrl:null})}/>}
+          value={layout}
+          onChange={setLayout}/>}
+
 
         {!!error && <Text style={styles.error}>{error}</Text>}
         {busy && <ActivityIndicator color={COLORS.primaryLight}/>}
