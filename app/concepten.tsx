@@ -205,10 +205,10 @@ export default function ConceptenScreen() {
           </View> : null)}
         </View>}
         <Text style={styles.title}>Bewerkbare AI-tekening</Text>
-        {!layout?.backgroundCalibration && selected?.status==="ready" && (
+        {selected?.status==="ready" && (
           <Pressable style={styles.button} disabled={calibrating || busy}
             onPress={()=>void recalibrateField()}>
-            <Text style={styles.buttonText}>{calibrating ? "Veld uitsnijden…" : "Veld automatisch uitsnijden"}</Text>
+            <Text style={styles.buttonText}>{calibrating ? "Veld uitsnijden…" : "Veld opnieuw automatisch uitsnijden"}</Text>
           </Pressable>
         )}
         {!layout?.backgroundCalibration && (
