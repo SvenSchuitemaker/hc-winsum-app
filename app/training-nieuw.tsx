@@ -203,6 +203,7 @@ export default function TrainingNieuwScreen() {
     const [blocks, setBlocks] = useState<BlockDraft[]>([]);
     const [loadingData, setLoadingData] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState("");
     const [templateLoading, setTemplateLoading] = useState(false);
 
     const exercises = useMemo(() => {
@@ -558,6 +559,7 @@ export default function TrainingNieuwScreen() {
     function conceptId(value: string | undefined) { return value?.startsWith("concept:") ? value.slice(8) : null; }
 
     async function handleSave() {
+        setSaveError("");
         if (!user) {
             Alert.alert("Inloggen vereist", "Log eerst in om een training op te slaan.");
             return;
@@ -587,6 +589,11 @@ export default function TrainingNieuwScreen() {
 
             if (!supabase) {
                 throw new Error("Supabase is niet geladen.");
+            }
+
+            const { error: conceptSchemaError } = await supabase.from("training_blocks").select("concept_id").limit(0);
+            if (conceptSchemaError && validBlocks.some(block => conceptId(block.exerciseId))) {
+                throw new Error("Eigen oefeningen kunnen nog niet aan trainingen worden gekoppeld: de Supabase-migratie voor concept_id ontbreekt. Je training is niet opgeslagen.");
             }
 
             const first = validBlocks[0];
@@ -619,21 +626,27 @@ export default function TrainingNieuwScreen() {
                     position: index + 1,
                     title: block.title.trim(),
                     exercise_id: publishedId(block.exerciseId),
-                    concept_id: conceptId(block.exerciseId),
+                    ...(conceptSchemaError ? {} : { concept_id: conceptId(block.exerciseId) }),
                     duration: Number(block.duration) || 0,
                     notes: block.notes.trim() || null,
                 }))
             );
 
-            if (blocksError) throw blocksError;
+            if (blocksError) {
+                // Prevent an unusable training from remaining in the planning.
+                const { error: rollbackError } = await supabase.from("trainings").delete().eq("id", data.id);
+                if (rollbackError) {
+                    throw new Error(`Onderdelen opslaan mislukt (${blocksError.message}). Training #${data.id} bestaat nog zonder onderdelen; verwijderen mislukte ook (${rollbackError.message}).`);
+                }
+                throw new Error(`Training niet opgeslagen: ${blocksError.message}`);
+            }
 
             Alert.alert("Gelukt", "Training opgeslagen.");
             router.replace(`/training/${data.id}`);
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Opslaan mislukt."
-            );
+            const message = error instanceof Error ? error.message : "Opslaan mislukt.";
+            setSaveError(message);
+            if (Platform.OS !== "web") Alert.alert("Fout", message);
         } finally {
             setSaving(false);
         }
@@ -651,6 +664,7 @@ export default function TrainingNieuwScreen() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.card}>
                 <Text style={styles.title}>Nieuwe training</Text>
+                {!!saveError && <Text style={{ color: "#FF8A8A", fontWeight: "700", marginBottom: 12 }}>{saveError}</Text>}
                 <Text style={styles.text}>
                     Stel een training samen met meerdere onderdelen en koppel hem aan een team.
                 </Text>
