@@ -11,7 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 
 type Concept = {
-  id: string; title: string; category_slug: string; status: string;
+  id: string; user_id: string; title: string; category_slug: string; status: string;
   source_image_url: string | null; board_layout: ExerciseBoardLayout;
   subtitle: string | null; explanation: string | null; instructions: string | null;
   simplify: string | null; build_up: string | null; difficulty: string;
@@ -38,7 +38,7 @@ export default function ConceptenScreen() {
     setLoading(true);
     try {
       const {data,error:fetchError} = await supabase.from("exercise_concepts")
-        .select("*").eq("user_id", user.id).in("status", ["ready", "rejected"]).order("created_at",{ascending:false});
+        .select("*").in("status", ["ready", "rejected"]).order("created_at",{ascending:false});
       if (fetchError) throw fetchError;
       setConcepts(((data || []) as Concept[]).filter(concept => concept.status !== "approved"));
     } catch (e) { setError(e instanceof Error ? e.message : "Concepten laden mislukt."); }
@@ -146,44 +146,27 @@ export default function ConceptenScreen() {
     if (!layout.items.length) {setError("Dit concept heeft geen tekenobjecten.");return;}
     setBusy(true);setError("");
     try {
-      // Capture first using the same board renderer as manual drawings.
-      // A concept never becomes public without a successfully rendered preview.
-      const {data:created,error:insertError}=await supabase.from("exercises").insert({
-        title:selected.title,category_slug:selected.category_slug,
-        image_url:null,subtitle:selected.subtitle,
-        explanation:selected.explanation,instructions:selected.instructions,
-        simplify:selected.simplify,build_up:selected.build_up,
-        difficulty:selected.difficulty,audience:selected.audience,
-        board_layout:{...layout,backgroundImageUrl:null},
-      }).select("id").single();
-      if(insertError || !created?.id) throw insertError || new Error("Oefening opslaan mislukt.");
-      try {
-        const image=await uploadExerciseBoardPreview({
-          exerciseId:created.id,title:selected.title,boardRef:editor.current,boardLayout:layout,
-        });
-        if (!image || image.includes("/imports/")) throw new Error("Geen getekende bordafbeelding ontvangen.");
-        const {error:imageError}=await supabase.from("exercises").update({image_url:image}).eq("id",created.id);
-        if(imageError) throw imageError;
-      } catch(e) {
-        // Never publish a fallback original photo as if it were the AI drawing.
-        await supabase.from("exercises").delete().eq("id",created.id);
-        throw e;
-      }
-      const {error:stateError}=await supabase.from("exercise_concepts")
-        .update({status:"approved",published_exercise_id:created.id,reviewed_at:new Date().toISOString()})
-        .eq("id",selected.id).eq("status","ready");
-      if(stateError) throw stateError;
+      // Upload the rendered drawing before publication. The database RPC
+      // checks reviewer permissions and publishes the exercise atomically.
+      const image=await uploadExerciseBoardPreview({
+        exerciseId:Date.now(),title:selected.title,boardRef:editor.current,boardLayout:layout,
+      });
+      if (!image || image.includes("/imports/")) throw new Error("Geen getekende bordafbeelding ontvangen.");
+      const {error:publishError}=await supabase.rpc("approve_trainer_exercise", {
+        p_concept_id:selected.id, p_image_url:image,
+      });
+      if (publishError) throw publishError;
       setConcepts(current => current.filter(concept => concept.id !== selected.id));
       setSelected(null);setLayout(null);await reload();
     } catch(e) { setError(e instanceof Error ? e.message : "Publiceren mislukt."); }
     finally {setBusy(false);}
   }
 
-  if(role !== "super_admin") return <View style={styles.root}><Text style={styles.body}>Alleen hoofdbeheerders kunnen concepten beoordelen.</Text></View>;
+  if(role !== "super_admin" && role !== "head_trainer") return <View style={styles.root}><Text style={styles.body}>Alleen hoofdtrainers en beheerders kunnen concepten beoordelen.</Text></View>;
   return <View style={styles.root}>
     <ScrollView contentContainerStyle={styles.content}>
       <Pressable style={styles.backButton} onPress={()=>router.replace("/(tabs)/nieuwe-oefeningen" as never)}><Ionicons name="arrow-back" size={20} color={COLORS.text}/><Text style={styles.backText}>Terug naar nieuwe oefening</Text></Pressable>
-      <Text style={styles.heading}>AI-concepten</Text>
+      <Text style={styles.heading}>Oefeningconcepten beoordelen</Text>
       <Text style={styles.body}>Bekijk elke tekening. Alleen goedgekeurde concepten worden openbaar.</Text>
       <Pressable onPress={()=>void reload()}><Text style={styles.link}>Vernieuwen</Text></Pressable>
       {!!error && <Text style={styles.error}>{error}</Text>}
@@ -193,7 +176,7 @@ export default function ConceptenScreen() {
         <Text style={styles.title}>{c.title}</Text>
         <Text style={styles.body}>{c.category_slug} · {c.status==="ready"?"Wacht op controle":c.status==="approved"?"Goedgekeurd":"Afgewezen"}</Text>
         {c.source_image_url && <Image source={{uri:c.source_image_url}} style={styles.thumb} resizeMode="contain"/>}
-        {c.status==="rejected" ? <Pressable style={styles.deleteButton} disabled={busy} accessibilityRole="button" accessibilityLabel="Afgewezen concept verwijderen"
+        {c.status==="rejected" && c.user_id === user?.id ? <Pressable style={styles.deleteButton} disabled={busy} accessibilityRole="button" accessibilityLabel="Afgewezen concept verwijderen"
           onPress={(event)=>{event.stopPropagation();void deleteRejected(c);}}>
           <Ionicons name="trash-outline" size={20} color="#FFFFFF"/>
         </Pressable> : <Text style={styles.link}>Bekijk tekening →</Text>}
