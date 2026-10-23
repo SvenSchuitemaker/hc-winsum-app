@@ -17,9 +17,12 @@ import {
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
+import ExerciseAnimation from "../../components/ExerciseAnimation";
+import type { ExerciseBoardLayout } from "../../components/exercise-board/boardTypes";
 
 type DbExercise = {
     id: number;
+    board_layout?: ExerciseBoardLayout | null;
     category_slug: string;
     title: string;
     image_url: string | null;
@@ -59,6 +62,7 @@ export default function ExerciseDetailScreen() {
     const { width } = useWindowDimensions();
 
     const [exercise, setExercise] = useState<DbExercise | null>(null);
+    const [showAnimation, setShowAnimation] = useState(false);
     const [loading, setLoading] = useState(true);
     const [errorText, setErrorText] = useState("");
     const [isFavorite, setIsFavorite] = useState(false);
@@ -293,6 +297,13 @@ export default function ExerciseDetailScreen() {
                     />
                 </View>
 
+                {!!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
+                    <Pressable style={{backgroundColor:COLORS.primary,padding:13,borderRadius:12,marginBottom:12}}
+                        onPress={() => setShowAnimation(value => !value)}>
+                        <Text style={{color:"#fff",fontWeight:"900",textAlign:"center"}}>{showAnimation ? "Animatie sluiten" : "▶ Bekijk oefeninganimatie"}</Text>
+                    </Pressable>
+                    {showAnimation && <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url}/>}
+                </>}
                 <View style={styles.titleRow}>
                     <View style={styles.titleWrap}>
                         <Text style={styles.pageTitle}>{exercise.title}</Text>

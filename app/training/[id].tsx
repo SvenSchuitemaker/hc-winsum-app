@@ -16,6 +16,7 @@ import {
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
 import { getTrainerExercisePreviewUrl } from "../../lib/trainerExercisePreview";
+import { useAuth } from "../../context/AuthContext";
 
 type ExerciseRef = {
     id: number;
@@ -30,6 +31,7 @@ type TeamRef = {
 
 type TrainingBlock = {
     id?: number;
+    is_break?: boolean;
     position: number;
     title: string;
     duration: number;
@@ -80,6 +82,10 @@ function formatDateForDisplay(dateString: string | null) {
 
 export default function TrainingDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
+    const { user, role } = useAuth();
+    const [feedback, setFeedback] = useState<{id:string;message:string;created_at:string;author_user_id:string}[]>([]);
+    const [feedbackText, setFeedbackText] = useState("");
+    const [savingFeedback, setSavingFeedback] = useState(false);
 
     const [training, setTraining] = useState<TrainingDetail | null>(null);
     const [blocks, setBlocks] = useState<TrainingBlock[]>([]);
@@ -143,6 +149,7 @@ export default function TrainingDetailScreen() {
             id,
             position,
             title,
+            is_break,
             duration,
             notes,
             exercises:exercises ( id, title, image_url ),
@@ -201,7 +208,7 @@ export default function TrainingDetailScreen() {
             const loadedBlocks = await Promise.all(((blockData as any[]) || []).map(async (block) => {
                 const concept: any = normalizeRelation(block.concept);
                 return {
-                    id: block.id, position: block.position, title: block.title,
+                    id: block.id, position: block.position, title: block.title, is_break: !!block.is_break,
                     duration: block.duration, notes: block.notes,
                     exercises: normalizeRelation(block.exercises),
                     concept: concept ? {
@@ -211,6 +218,11 @@ export default function TrainingDetailScreen() {
                 } as TrainingBlock;
             }));
             setBlocks(loadedBlocks);
+            const { data: feedbackData, error: feedbackError } = await supabase.from("training_feedback")
+                .select("id, message, created_at, author_user_id")
+                .eq("training_id", Number(id)).order("created_at", {ascending: false});
+            if (feedbackError) throw feedbackError;
+            setFeedback(feedbackData || []);
 
             const loadedNote = (noteData as TrainingNote | null) ?? null;
             setNote(loadedNote);
@@ -384,6 +396,21 @@ export default function TrainingDetailScreen() {
         }
     }
 
+    async function sendFeedback() {
+        if (!supabase || !user || !training || !feedbackText.trim()) return;
+        setSavingFeedback(true);
+        try {
+            const { data, error } = await supabase.from("training_feedback")
+                .insert({ training_id: training.id, author_user_id: user.id, message: feedbackText.trim() })
+                .select("id, message, created_at, author_user_id").single();
+            if (error) throw error;
+            setFeedback(current => [data, ...current]);
+            setFeedbackText("");
+        } catch (reason) {
+            Alert.alert("Feedback niet opgeslagen", reason instanceof Error ? reason.message : "Probeer opnieuw.");
+        } finally { setSavingFeedback(false); }
+    }
+
     const totalTime = useMemo(
         () => blocks.reduce((sum, block) => sum + (block.duration || 0), 0),
         [blocks]
@@ -425,6 +452,10 @@ export default function TrainingDetailScreen() {
                     <Text style={styles.totalTime}>Totale tijd: {totalTime} minuten</Text>
                 </View>
 
+                <Pressable style={styles.saveNoteButton} onPress={() => router.push(`/training-live/${training.id}`)}>
+                    <Text style={styles.saveNoteButtonText}>▶ Start trainingsmodus</Text>
+                </Pressable>
+                <View style={{height: 14}} />
                 <View style={styles.actionRow}>
                     <Pressable
                         style={styles.iconActionButton}
@@ -484,7 +515,7 @@ export default function TrainingDetailScreen() {
                                 router.push({ pathname: "/eigen-oefening", params: { id: block.concept.id } } as never);
                             }
                         }}
-                        disabled={!block.exercises?.id && !block.concept?.id}
+                        disabled={!!block.is_break || (!block.exercises?.id && !block.concept?.id)}
                     >
                         <View style={styles.blockHeader}>
                             <View style={styles.numberBadge}>
@@ -493,7 +524,7 @@ export default function TrainingDetailScreen() {
                             <Text style={styles.blockTitle}>{block.title}</Text>
                         </View>
 
-                        <Text style={styles.blockText}>{block.exercises?.title || block.concept?.title || "Privéconcept (niet openbaar)"}</Text>
+                        <Text style={styles.blockText}>{block.is_break ? "⏸ Tijd om het veld klaar te zetten" : block.exercises?.title || block.concept?.title || "Privéconcept (niet openbaar)"}</Text>
                         {!!(block.concept?.image_url || block.exercises?.image_url) && <Image source={{ uri: block.concept?.image_url || block.exercises?.image_url || "" }} style={{ width: "100%", height: 170, marginVertical: 10, borderRadius: 12 }} resizeMode="contain" />}
                         <Text style={styles.blockTime}>{block.duration} minuten</Text>
                         {!!block.notes && <Text style={styles.blockNotes}>{block.notes}</Text>}
@@ -502,6 +533,23 @@ export default function TrainingDetailScreen() {
                 ))}
             </View>
 
+            <View style={styles.card}>
+                <Text style={styles.notesTitle}>Feedback van hoofdtrainers</Text>
+                {feedback.length === 0 && <Text style={styles.blockNotes}>Er is nog geen feedback gegeven.</Text>}
+                {feedback.map(item => <View key={item.id} style={styles.block}>
+                    <Text style={styles.blockTitle}>Hoofdtrainer · {new Date(item.created_at).toLocaleDateString("nl-NL")}</Text>
+                    <Text style={styles.blockNotes}>{item.message}</Text>
+                </View>)}
+                {(role === "head_trainer" || role === "super_admin") && <>
+                    <TextInput style={[styles.input, styles.textarea]} multiline value={feedbackText}
+                        onChangeText={setFeedbackText} placeholder="Geef de trainer een tip of compliment..."
+                        placeholderTextColor={COLORS.mutedText} maxLength={2000} />
+                    <Pressable disabled={savingFeedback || !feedbackText.trim()} style={styles.saveNoteButton}
+                        onPress={() => void sendFeedback()}>
+                        <Text style={styles.saveNoteButtonText}>{savingFeedback ? "Opslaan..." : "Feedback plaatsen"}</Text>
+                    </Pressable>
+                </>}
+            </View>
             <View style={styles.card}>
                 <Text style={styles.notesTitle}>Evaluatie na training</Text>
 

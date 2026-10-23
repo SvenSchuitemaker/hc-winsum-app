@@ -60,11 +60,13 @@ type TrainingBlockRow = {
     title: string;
     exercise_id: number | null;
     concept_id?: string | null;
+    is_break?: boolean;
     duration: number;
     notes: string | null;
 };
 
 type BlockDraft = {
+    isBreak?: boolean;
     localId: string;
     title: string;
     exerciseId: string;
@@ -217,7 +219,7 @@ export default function TrainingBewerkScreen() {
                     .single(),
                 supabase
                     .from("training_blocks")
-                    .select("position, title, exercise_id, concept_id, duration, notes")
+                    .select("position, title, exercise_id, concept_id, is_break, duration, notes")
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
             ]);
@@ -282,7 +284,8 @@ export default function TrainingBewerkScreen() {
                     trainingBlocks.map((block) => ({
                         localId: makeLocalId(),
                         title: block.title,
-                        exerciseId: block.concept_id ? `concept:${block.concept_id}` : block.exercise_id ? String(block.exercise_id) : fallbackExerciseId,
+                        isBreak: !!block.is_break,
+                        exerciseId: block.is_break ? "" : block.concept_id ? `concept:${block.concept_id}` : block.exercise_id ? String(block.exercise_id) : fallbackExerciseId,
                         duration: String(block.duration ?? 0),
                         notes: block.notes || "",
                     }))
@@ -380,6 +383,13 @@ export default function TrainingBewerkScreen() {
         ]);
     }
 
+    function addBreak() {
+        setBlocks(current => [...current, {
+            localId: makeLocalId(), isBreak: true, title: "Pauze / veld klaarzetten",
+            exerciseId: "", duration: "5", notes: "Tijd om de volgende oefening klaar te zetten.",
+        }]);
+    }
+
     function removeBlock(localId: string) {
         setBlocks((current) => current.filter((block) => block.localId !== localId));
     }
@@ -416,7 +426,7 @@ export default function TrainingBewerkScreen() {
         }
 
         const validBlocks = blocks.filter(
-            (block) => block.title.trim() && block.exerciseId.trim()
+            (block) => block.title.trim() && (block.isBreak || block.exerciseId.trim())
         );
 
         if (validBlocks.length === 0) {
@@ -436,9 +446,10 @@ export default function TrainingBewerkScreen() {
                 throw new Error("Eigen oefeningen kunnen nog niet worden opgeslagen: de Supabase-migratie voor concept_id ontbreekt. De bestaande training is niet gewijzigd.");
             }
 
-            const first = validBlocks[0];
-            const second = validBlocks[1];
-            const third = validBlocks[2];
+            const exerciseBlocks = validBlocks.filter(block => !block.isBreak);
+            const first = exerciseBlocks[0];
+            const second = exerciseBlocks[1];
+            const third = exerciseBlocks[2];
 
             const { error: updateError } = await supabase
                 .from("trainings")
@@ -469,8 +480,9 @@ export default function TrainingBewerkScreen() {
                     training_id: Number(id),
                     position: index + 1,
                     title: block.title.trim(),
-                    exercise_id: publishedId(block.exerciseId),
-                    ...(conceptSchemaError ? {} : { concept_id: conceptId(block.exerciseId) }),
+                    exercise_id: block.isBreak ? null : publishedId(block.exerciseId),
+                    is_break: !!block.isBreak,
+                    ...(conceptSchemaError ? {} : { concept_id: block.isBreak ? null : conceptId(block.exerciseId) }),
                     duration: Number(block.duration) || 0,
                     notes: block.notes.trim() || null,
                 }))
@@ -600,12 +612,13 @@ export default function TrainingBewerkScreen() {
                     <Pressable style={styles.smallButton} onPress={addBlock}>
                         <Text style={styles.smallButtonText}>Onderdeel toevoegen</Text>
                     </Pressable>
+                    <Pressable style={styles.smallButton} onPress={addBreak}><Text style={styles.smallButtonText}>+ Pauze</Text></Pressable>
                 </View>
 
                 {blocks.map((block, index) => (
                     <View key={block.localId} style={styles.blockCard}>
                         <View style={styles.blockTopRow}>
-                            <Text style={styles.blockNumber}>Onderdeel {index + 1}</Text>
+                            <Text style={styles.blockNumber}>{block.isBreak ? "Pauze" : "Onderdeel"} {index + 1}</Text>
 
                             <View style={styles.blockActions}>
                                 <Pressable
@@ -640,7 +653,7 @@ export default function TrainingBewerkScreen() {
                             onChangeText={(value) => updateBlock(block.localId, "title", value)}
                         />
 
-                        {(() => {
+                        {!block.isBreak && (() => {
                             const selectedExercise = getSelectedExercise(block.exerciseId);
                             return (
                                 <Pressable style={styles.exercisePickerButton} onPress={() => openExerciseSelector(block.localId)}>
@@ -662,7 +675,7 @@ export default function TrainingBewerkScreen() {
 
                         <TextInput
                             style={styles.input}
-                            placeholder="Duur in minuten"
+                            placeholder={block.isBreak ? "Pauze in minuten" : "Duur in minuten"}
                             placeholderTextColor={COLORS.mutedText}
                             keyboardType="numeric"
                             value={block.duration}
