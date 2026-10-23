@@ -290,7 +290,7 @@ export default function ExerciseDetailScreen() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={[styles.pageContent, isDesktop && styles.pageContentDesktop]}>
                 {showAnimation && exercise.board_layout ? (
-                    <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url}/>
+                    <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url} exerciseId={exercise.id} onClose={() => setShowAnimation(false)}/>
                 ) : (
                     <View style={[styles.imageWrap, isDesktop && styles.imageWrapDesktop]}>
                         <Image
@@ -301,10 +301,10 @@ export default function ExerciseDetailScreen() {
                     </View>
                 )}
 
-                {!!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
+                {!showAnimation && !!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
                     <Pressable style={{backgroundColor:COLORS.primary,padding:13,borderRadius:12,marginBottom:12}}
                         onPress={() => setShowAnimation(value => !value)}>
-                        <Text style={{color:"#fff",fontWeight:"900",textAlign:"center"}}>{showAnimation ? "Animatie sluiten" : "▶ Bekijk oefeninganimatie"}</Text>
+                        <Text style={{color:"#fff",fontWeight:"900",textAlign:"center"}}>▶ Bekijk oefeninganimatie</Text>
                     </Pressable>
 
                 </>}

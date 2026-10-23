@@ -8,7 +8,8 @@ import {
     getArrowHeadPath, renderHalfField, renderTopField,
 } from "./exercise-board/boardRenderUtils";
 
-type Props = { layout?: ExerciseBoardLayout | null; imageUrl?: string | null; autoplay?: boolean };
+type AnimationPlan = { order: string[]; carryingRunIds: string[] };
+type Props = { layout?: ExerciseBoardLayout | null; imageUrl?: string | null; autoplay?: boolean; exerciseId?: number; onClose?: () => void };
 type Point = {x:number;y:number};
 const SHIRT = "M 7 2.5 L 9 3.7 Q 11 5.3 13 3.7 L 15 2.5 L 21 6.5 L 18 12 L 15.9 10.9 L 15.9 20 L 6.1 20 L 6.1 10.9 L 4 12 L 1 6.5 Z";
 const SHIRT_COLORS: Record<string,string> = {black:"#171717",orange:"#F39A25",blue:"#199ED8",grey:"#A5A5A5",white:"#F5F5F5",red:"#D93945",green:"#2EAD72"};
@@ -71,24 +72,69 @@ function Jersey({x,y,color,label}: {x:number;y:number;color?:string;label?:strin
         {!!label&&<SvgText x="11" y="15" textAnchor="middle" fontSize={label.length>2?"7":"9"} fontWeight="900" fill={textFill}>{label}</SvgText>}
     </G>;
 }
-export default function ExerciseAnimation({layout, autoplay=false}: Props) {
+export default function ExerciseAnimation({layout, autoplay=false,exerciseId,onClose}: Props) {
+    const [aiPlan,setAiPlan]=useState<AnimationPlan|null>(null);
+    const [planning,setPlanning]=useState(!!exerciseId);
+    useEffect(()=>{
+        let active=true;
+        setAiPlan(null);
+        if(!exerciseId){setPlanning(false);return;}
+        setPlanning(true);
+        import("../lib/supabase").then(async({supabase})=>{
+            if(!supabase)return;
+            const {data,error}=await supabase.functions.invoke("plan-exercise-animation",{body:{exerciseId}});
+            if(!active||error||!data||!Array.isArray(data.order))return;
+            setAiPlan({order:data.order,carryingRunIds:Array.isArray(data.carryingRunIds)?data.carryingRunIds:[]});
+            setElapsed(0);
+        }).catch(()=>{}).finally(()=>{if(active)setPlanning(false);});
+        return()=>{active=false;};
+    },[exerciseId]);
     const [playing,setPlaying]=useState(autoplay);
     const [elapsed,setElapsed]=useState(0);
     const lines=useMemo(() => {
-        const ordered=(layout?.items||[]).filter(item=>
+        const drawn=(layout?.items||[]).filter(item=>
             ["runLine","passLine"].includes(item.type)&&typeof item.x2==="number"&&typeof item.y2==="number"
         );
-        // A dribble/run must finish before a pass/shot that starts at its endpoint.
-        // Imported images often list the pass before the corresponding run.
-        for(let i=0;i<ordered.length;i++){
-            const run=ordered[i];
-            if(run.type!=="runLine")continue;
-            const following=ordered.findIndex((candidate,index)=>index<i&&candidate.type==="passLine"&&
-                Math.hypot((candidate.x-run.x2!),(candidate.y-run.y2!))<0.085);
-            if(following>=0){ordered.splice(i,1);ordered.splice(following,0,run);}
+        const ordered=[...drawn];
+        if(aiPlan?.order?.length===drawn.length &&
+            new Set(aiPlan.order).size===drawn.length &&
+            aiPlan.order.every(id=>drawn.some(item=>item.id===id))){
+            ordered.sort((a,b)=>aiPlan.order.indexOf(a.id)-aiPlan.order.indexOf(b.id));
+        }else{
+            // Offline fallback: schedule receiving runs before the pass arriving at
+            // their endpoint and dribbles before passes leaving their endpoint.
+            for(let attempt=0;attempt<ordered.length;attempt++){
+                let changed=false;
+                for(let i=0;i<ordered.length;i++){
+                    const run=ordered[i];
+                    if(run.type!=="runLine")continue;
+                    const laterPass=ordered.findIndex((candidate,index)=>index<i&&candidate.type==="passLine"&&(
+                        Math.hypot(candidate.x-run.x2!,candidate.y-run.y2!)<0.065 ||
+                        Math.hypot(candidate.x2!-run.x2!,candidate.y2!-run.y2!)<0.065
+                    ));
+                    if(laterPass>=0){
+                        ordered.splice(i,1);
+                        ordered.splice(laterPass,0,run);
+                        changed=true;
+                        break;
+                    }
+                }
+                if(!changed)break;
+            }
         }
         return ordered.map(item=>({item,path:linePath(item),points:sampleBoardPath(linePath(item))}));
-    },[layout]);
+    },[layout,aiPlan]);
+    const carryingRuns=useMemo(()=>{
+        if(aiPlan)return new Set(aiPlan.carryingRunIds);
+        const carrying=new Set<string>();
+        lines.forEach(({item},index)=>{
+            if(item.type!=="runLine")return;
+            const previous=lines.slice(0,index).reverse().find(({item:before})=>
+                before.type==="passLine"&&Math.hypot(before.x2!-item.x,before.y2!-item.y)<0.065);
+            if(previous)carrying.add(item.id);
+        });
+        return carrying;
+    },[aiPlan,lines]);
     const stillItems=useMemo(()=>(layout?.items||[]).filter(item=>!["runLine","passLine","guideLine"].includes(item.type)),[layout]);
     const runOwners=useMemo(()=>{
         const players=stillItems.filter(item=>["player","attacker","defender","trainer"].includes(item.type));
@@ -145,19 +191,34 @@ export default function ExerciseAnimation({layout, autoplay=false}: Props) {
                     if(item.type==="text")return <SvgText key={item.id} x={x} y={y} fill="#fff" fontSize="2.5" textAnchor="middle">{item.text||""}</SvgText>;
                     return null;
                 })}
-                {!!position&&!!moving&&<Circle cx={position.x+(moving.item.type==="runLine"?1.7:0)}
+                {!!position&&!!moving&&(moving.item.type==="passLine"||carryingRuns.has(moving.item.id))&&<Circle cx={position.x+(moving.item.type==="runLine"?1.7:0)}
                     cy={position.y+(moving.item.type==="runLine"?1.7:0)} r={1.4} fill="#fff" stroke="#111" strokeWidth="0.6"/>}
             </Svg>
         </View>
-        {lines.length?<View style={styles.controls}>
-            <Pressable style={styles.button} onPress={()=>setPlaying(value=>!value)}><Text style={styles.buttonText}>{playing?"⏸ Pauzeren":"▶ Afspelen"}</Text></Pressable>
-            <Pressable style={styles.button} onPress={()=>{setElapsed(0);setPlaying(false);}}><Text style={styles.buttonText}>↺ Opnieuw</Text></Pressable>
-            <Text style={styles.caption}>Stap {activeIndex+1} van {lines.length}</Text>
-        </View>:<Text style={styles.caption}>Teken loop- of passlijnen om de animatie te bekijken.</Text>}
+        <View style={styles.controls}>
+            <View style={styles.buttons}>
+                <Pressable style={[styles.button,styles.primaryButton]} onPress={()=>setPlaying(value=>!value)}>
+                    <Text style={styles.buttonText}>{playing?"⏸ Pauzeren":"▶ Afspelen"}</Text>
+                </Pressable>
+                <Pressable style={styles.button} onPress={()=>{setElapsed(0);setPlaying(false);}}>
+                    <Text style={styles.buttonText}>↺ Opnieuw</Text>
+                </Pressable>
+                {!!onClose&&<Pressable style={[styles.button,styles.closeButton]} onPress={onClose}>
+                    <Text style={styles.buttonText}>✕ Sluiten</Text>
+                </Pressable>}
+            </View>
+            <Text style={styles.caption}>{planning?"AI bekijkt de oefening en bepaalt wie passt, loopt en schiet…":lines.length?`Stap ${activeIndex+1} van ${lines.length}`:"Teken loop- of passlijnen om de animatie te bekijken."}</Text>
+        </View>
     </View>;
 }
 const styles=StyleSheet.create({
-    container:{gap:8},field:{width:"100%",aspectRatio:1.15,backgroundColor:"#112b46",borderRadius:10,overflow:"hidden"},
-    controls:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:10},button:{backgroundColor:COLORS.primary,paddingVertical:10,paddingHorizontal:12,borderRadius:10},
-    buttonText:{color:"#fff",fontWeight:"800"},caption:{color:COLORS.mutedText,fontSize:13}
+    container:{gap:12,marginBottom:16},
+    field:{width:"100%",aspectRatio:1.15,backgroundColor:"#112b46",borderRadius:12,overflow:"hidden"},
+    controls:{backgroundColor:COLORS.surface,borderRadius:14,borderWidth:1,borderColor:COLORS.border,padding:12,gap:12},
+    buttons:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},
+    button:{backgroundColor:COLORS.surfaceLight,paddingVertical:11,paddingHorizontal:14,borderRadius:10,minHeight:44,justifyContent:"center",alignItems:"center"},
+    primaryButton:{backgroundColor:COLORS.primary},
+    closeButton:{borderWidth:1,borderColor:COLORS.border,marginLeft:"auto"},
+    buttonText:{color:"#fff",fontWeight:"800",fontSize:14},
+    caption:{color:COLORS.mutedText,fontSize:13,textAlign:"center"}
 });
