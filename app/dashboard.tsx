@@ -531,6 +531,11 @@ export default function DashboardScreen() {
                     <Text style={styles.heroText}>
                         In één overzicht zie je hoe actief de trainers en teams zijn en hoe de oefenbibliotheek is opgebouwd.
                     </Text>
+                    <Pressable onPress={() => router.push("/concepten" as never)}
+                        style={{ marginTop: 12, alignSelf:"flex-start", backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: RADIUS.md, flexDirection:"row", alignItems:"center", gap:8 }}>
+                        <Ionicons name="checkmark-done-outline" size={20} color="#FFFFFF" />
+                        <Text style={{ color:"#FFFFFF", fontWeight:"800" }}>Oefeningconcepten beoordelen</Text>
+                    </Pressable>
 
                     <Pressable
                         style={styles.weekOverviewButton}

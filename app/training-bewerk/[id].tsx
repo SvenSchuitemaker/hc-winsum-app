@@ -3,8 +3,8 @@ import DateTimePicker, {
     DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -21,9 +21,11 @@ import {
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
+import { takeCreatedTrainerExercise } from "../../lib/trainerExerciseSelection";
 
 type ExerciseOption = {
-    id: number;
+    id: number | string;
+    isConcept?: boolean;
     title: string;
     category_slug: string;
     image_url: string | null;
@@ -56,6 +58,7 @@ type TrainingBlockRow = {
     position: number;
     title: string;
     exercise_id: number | null;
+    concept_id?: string | null;
     duration: number;
     notes: string | null;
 };
@@ -109,7 +112,8 @@ export default function TrainingBewerkScreen() {
     const [categories, setCategories] = useState<CategoryOption[]>([]);
     const [allExercises, setAllExercises] = useState<ExerciseOption[]>([]);
     const [favoriteExercises, setFavoriteExercises] = useState<ExerciseOption[]>([]);
-    const [exerciseSource, setExerciseSource] = useState<"all" | "favorites">("all");
+    const [ownExercises, setOwnExercises] = useState<ExerciseOption[]>([]);
+    const [exerciseSource, setExerciseSource] = useState<"all" | "favorites" | "own">("all");
     const [exerciseSelectorBlockId, setExerciseSelectorBlockId] = useState<string | null>(null);
     const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState<string>("all");
 
@@ -118,13 +122,36 @@ export default function TrainingBewerkScreen() {
     const [saving, setSaving] = useState(false);
 
     const exercises = useMemo(() => {
-        return exerciseSource === "favorites" ? favoriteExercises : allExercises;
-    }, [exerciseSource, favoriteExercises, allExercises]);
+        return exerciseSource === "favorites" ? favoriteExercises : exerciseSource === "own" ? ownExercises : allExercises;
+    }, [exerciseSource, favoriteExercises, ownExercises, allExercises]);
 
     const selectorExercises = useMemo(() => {
         if (exerciseCategoryFilter === "all") return exercises;
         return exercises.filter((exercise) => exercise.category_slug === exerciseCategoryFilter);
     }, [exerciseCategoryFilter, exercises]);
+
+    useFocusEffect(useCallback(() => {
+        let active = true;
+        async function refreshOwn() {
+            if (!supabase || !user?.id) return;
+            const { data, error } = await supabase.from("exercise_concepts")
+                .select("id, title, category_slug, status, published_exercise_id")
+                .eq("user_id", user.id).in("status", ["ready", "rejected"]).order("created_at", { ascending: false });
+            if (!active) return;
+            if (error) { Alert.alert("Eigen oefeningen laden mislukt", error.message); return; }
+            setOwnExercises((data || []).filter(row => row.status === "ready" && !row.published_exercise_id)
+                .map(row => ({ id: `concept:${row.id}`, title: row.title, category_slug: row.category_slug, image_url: null, isConcept: true })));
+            const created = takeCreatedTrainerExercise();
+            if (created) {
+                setBlocks(current => current.map(block => block.localId === created.blockId
+                    ? { ...block, exerciseId: `concept:${created.conceptId}` } : block));
+                setExerciseSource("own");
+                setExerciseCategoryFilter("all");
+            }
+        }
+        void refreshOwn();
+        return () => { active = false; };
+    }, [user?.id]));
 
     const selectedExerciseBlock = useMemo(() => {
         if (!exerciseSelectorBlockId) return null;
@@ -172,7 +199,7 @@ export default function TrainingBewerkScreen() {
                     .single(),
                 supabase
                     .from("training_blocks")
-                    .select("position, title, exercise_id, duration, notes")
+                    .select("position, title, exercise_id, concept_id, duration, notes")
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
             ]);
@@ -227,7 +254,7 @@ export default function TrainingBewerkScreen() {
                     trainingBlocks.map((block) => ({
                         localId: makeLocalId(),
                         title: block.title,
-                        exerciseId: block.exercise_id ? String(block.exercise_id) : fallbackExerciseId,
+                        exerciseId: block.concept_id ? `concept:${block.concept_id}` : block.exercise_id ? String(block.exercise_id) : fallbackExerciseId,
                         duration: String(block.duration ?? 0),
                         notes: block.notes || "",
                     }))
@@ -307,7 +334,7 @@ export default function TrainingBewerkScreen() {
     }
 
     function getSelectedExercise(exerciseId: string) {
-        return allExercises.find((exercise) => String(exercise.id) === exerciseId) ?? null;
+        return [...allExercises, ...ownExercises].find((exercise) => String(exercise.id) === exerciseId) ?? null;
     }
 
     function addBlock() {
@@ -344,6 +371,9 @@ export default function TrainingBewerkScreen() {
             return copy;
         });
     }
+
+    function publishedId(value: string | undefined) { return value && !value.startsWith("concept:") ? Number(value) : null; }
+    function conceptId(value: string | undefined) { return value?.startsWith("concept:") ? value.slice(8) : null; }
 
     async function handleSave() {
         if (!title.trim()) {
@@ -382,11 +412,11 @@ export default function TrainingBewerkScreen() {
                     title: title.trim(),
                     training_date: formatDateForDatabase(trainingDate),
                     team_id: Number(selectedTeamId),
-                    warmup_exercise_id: first?.exerciseId ? Number(first.exerciseId) : null,
+                    warmup_exercise_id: publishedId(first?.exerciseId),
                     warmup_duration: Number(first?.duration || 0),
-                    main_exercise_id: second?.exerciseId ? Number(second.exerciseId) : null,
+                    main_exercise_id: publishedId(second?.exerciseId),
                     main_duration: Number(second?.duration || 0),
-                    match_exercise_id: third?.exerciseId ? Number(third.exerciseId) : null,
+                    match_exercise_id: publishedId(third?.exerciseId),
                     match_duration: Number(third?.duration || 0),
                 })
                 .eq("id", Number(id));
@@ -405,7 +435,8 @@ export default function TrainingBewerkScreen() {
                     training_id: Number(id),
                     position: index + 1,
                     title: block.title.trim(),
-                    exercise_id: Number(block.exerciseId),
+                    exercise_id: publishedId(block.exerciseId),
+                    concept_id: conceptId(block.exerciseId),
                     duration: Number(block.duration) || 0,
                     notes: block.notes.trim() || null,
                 }))
@@ -517,6 +548,9 @@ export default function TrainingBewerkScreen() {
                             Alleen favorieten
                         </Text>
                     </Pressable>
+                    <Pressable style={[styles.filterButton, exerciseSource === "own" && styles.filterButtonSelected]} onPress={() => setExerciseSource("own")}>
+                        <Text style={[styles.filterButtonText, exerciseSource === "own" && styles.filterButtonTextSelected]}>Eigen oefeningen</Text>
+                    </Pressable>
                 </View>
 
                 {exerciseSource === "favorites" && favoriteExercises.length === 0 && (
@@ -524,6 +558,8 @@ export default function TrainingBewerkScreen() {
                         Je hebt nog geen favorieten. Voeg eerst oefeningen toe aan je favorieten.
                     </Text>
                 )}
+
+                {exerciseSource === "own" && ownExercises.length === 0 && <Text style={styles.warningText}>Nog geen eigen oefeningen in afwachting van goedkeuring.</Text>}
 
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Trainingsonderdelen</Text>
@@ -636,15 +672,30 @@ export default function TrainingBewerkScreen() {
                                 })}
                             </ScrollView>
                             <ScrollView style={styles.exerciseModalScroll} contentContainerStyle={styles.exerciseGrid}>
+                                <Pressable style={styles.exerciseChoiceCard} accessibilityLabel="Maak oefening" onPress={() => {
+                                    const blockId = exerciseSelectorBlockId;
+                                    setExerciseSelectorBlockId(null);
+                                    router.push({ pathname: "/eigen-oefening", params: { blockId: blockId || "" } } as never);
+                                }}>
+                                    <View style={[styles.exerciseChoiceImage, { alignItems:"center", justifyContent:"center", backgroundColor:COLORS.surfaceLight, borderWidth:1, borderStyle:"dashed", borderColor:COLORS.primaryLight }]}>
+                                        <Ionicons name="add-circle-outline" size={46} color={COLORS.primaryLight} />
+                                    </View>
+                                    <Text style={styles.exerciseChoiceTitle}>Maak oefening</Text>
+                                </Pressable>
                                 {selectorExercises.length === 0 ? (
                                     <Text style={styles.modalEmptyText}>Geen oefeningen gevonden in deze categorie.</Text>
                                 ) : selectorExercises.map((exercise) => {
                                     const selected = selectedExerciseBlock?.exerciseId === String(exercise.id);
                                     return (
                                         <Pressable key={exercise.id} style={[styles.exerciseChoiceCard, selected && styles.exerciseChoiceCardSelected]} onPress={() => selectExercise(exercise)}>
-                                            <ImageBackground source={{ uri: exercise.image_url || "https://picsum.photos/600/400?random=99" }} style={styles.exerciseChoiceImage} imageStyle={styles.exerciseChoiceImageInner}>
+                                            {exercise.isConcept ? (
+                                                    <View style={[styles.exerciseChoiceImage, { backgroundColor: COLORS.surfaceLight, justifyContent:"center", alignItems:"center" }]}>
+                                                        <Ionicons name="create-outline" size={32} color={COLORS.primaryLight}/>
+                                                        {selected && <Ionicons name="checkmark-circle" size={19} color={COLORS.primaryLight}/>}
+                                                    </View>
+                                                ) : (<ImageBackground source={{ uri: exercise.image_url || "https://picsum.photos/600/400?random=99" }} style={styles.exerciseChoiceImage} imageStyle={styles.exerciseChoiceImageInner}>
                                                 {selected && <View style={styles.selectedExerciseBadge}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View>}
-                                            </ImageBackground>
+                                            </ImageBackground>)}
                                             <Text style={styles.exerciseChoiceTitle} numberOfLines={2}>{exercise.title}</Text>
                                         </Pressable>
                                     );

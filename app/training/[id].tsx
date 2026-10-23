@@ -33,6 +33,7 @@ type TrainingBlock = {
     duration: number;
     notes: string | null;
     exercises: ExerciseRef | null;
+    concept: { id: string; title: string } | null;
 };
 
 type TrainingNote = {
@@ -142,7 +143,8 @@ export default function TrainingDetailScreen() {
             title,
             duration,
             notes,
-            exercises:exercises ( id, title, image_url )
+            exercises:exercises ( id, title, image_url ),
+            concept:exercise_concepts ( id, title )
           `)
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
@@ -185,6 +187,7 @@ export default function TrainingDetailScreen() {
                 duration: block.duration,
                 notes: block.notes,
                 exercises: normalizeRelation(block.exercises),
+                concept: normalizeRelation(block.concept),
             })) as TrainingBlock[];
 
             setBlocks(loadedBlocks);
@@ -456,9 +459,11 @@ export default function TrainingDetailScreen() {
                         onPress={() => {
                             if (block.exercises?.id) {
                                 router.push(`/exercise/${block.exercises.id}`);
+                            } else if (block.concept?.id) {
+                                router.push({ pathname: "/eigen-oefening", params: { id: block.concept.id } } as never);
                             }
                         }}
-                        disabled={!block.exercises?.id}
+                        disabled={!block.exercises?.id && !block.concept?.id}
                     >
                         <View style={styles.blockHeader}>
                             <View style={styles.numberBadge}>
@@ -467,10 +472,10 @@ export default function TrainingDetailScreen() {
                             <Text style={styles.blockTitle}>{block.title}</Text>
                         </View>
 
-                        <Text style={styles.blockText}>{block.exercises?.title || "-"}</Text>
+                        <Text style={styles.blockText}>{block.exercises?.title || block.concept?.title || "Privéconcept (niet openbaar)"}</Text>
                         <Text style={styles.blockTime}>{block.duration} minuten</Text>
                         {!!block.notes && <Text style={styles.blockNotes}>{block.notes}</Text>}
-                        {!!block.exercises && <Text style={styles.linkText}>Open oefening</Text>}
+                        {(!!block.exercises || !!block.concept) && <Text style={styles.linkText}>Open oefening</Text>}
                     </Pressable>
                 ))}
             </View>
