@@ -3,8 +3,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Picker } from "@react-native-picker/picker";
-import ExerciseBoardEditor, { type ExerciseBoardLayout } from "../components/ExerciseBoardEditor";
-import { createEmptyBoardLayout } from "../lib/exerciseBoardStorage";
+import ExerciseBoardEditor, { type ExerciseBoardEditorRef, type ExerciseBoardLayout } from "../components/ExerciseBoardEditor";
+import { createEmptyBoardLayout, uploadExerciseBoardPreview } from "../lib/exerciseBoardStorage";
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { setCreatedTrainerExercise } from "../lib/trainerExerciseSelection";
@@ -32,6 +32,7 @@ export default function EigenOefeningScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const boardKey = useRef(0);
+    const boardRef = useRef<ExerciseBoardEditorRef | null>(null);
 
     useEffect(() => {
         let active = true;
@@ -79,20 +80,36 @@ export default function EigenOefeningScreen() {
             simplify: simplify.trim() || null, build_up: buildUp.trim() || null,
             difficulty, audience, board_layout: { ...layout, backgroundImageUrl: null },
         };
+        let insertedId: string | null = null;
         try {
-            if (id) {
-                const { error: saveError } = await supabase.from("exercise_concepts")
-                    .update(payload).eq("id", id).eq("user_id", user.id).eq("status", "ready");
-                if (saveError) throw saveError;
-            } else {
-                const { data, error: saveError } = await supabase.from("exercise_concepts")
+            const { error: schemaError } = await supabase.from("exercise_concepts").select("preview_image_path").limit(0);
+            if (schemaError) throw new Error("De database-update voor getekende oefeningafbeeldingen ontbreekt nog. Er is niets opgeslagen.");
+            if (!boardRef.current) throw new Error("Het tekenbord is nog niet klaar om op te slaan.");
+
+            let conceptKey = id;
+            if (!conceptKey) {
+                const { data, error: insertError } = await supabase.from("exercise_concepts")
                     .insert({ ...payload, user_id: user.id, status: "ready" }).select("id").single();
-                if (saveError) throw saveError;
-                if (blockId && data?.id) setCreatedTrainerExercise(blockId, data.id);
+                if (insertError || !data?.id) throw insertError || new Error("Concept aanmaken mislukt.");
+                conceptKey = data.id;
+                insertedId = data.id;
             }
+            // Persist a real PNG from the same board renderer used by public exercises.
+            // The preview stays in a private bucket and is not published with the concept.
+            const previewPath = await uploadExerciseBoardPreview({
+                exerciseId: Date.now(), title: title.trim(), boardRef: boardRef.current,
+                boardLayout: layout, privatePathPrefix: `${user.id}/${conceptKey}`,
+            });
+            const { data: saved, error: saveError } = await supabase.from("exercise_concepts")
+                .update({ ...payload, preview_image_path: previewPath })
+                .eq("id", conceptKey).eq("user_id", user.id).eq("status", "ready")
+                .select("id").single();
+            if (saveError || !saved?.id) throw saveError || new Error("Concept kon niet worden bijgewerkt.");
+            if (blockId) setCreatedTrainerExercise(blockId, saved.id);
             Alert.alert("Opgeslagen", "Je oefening is privé opgeslagen als concept en wacht op goedkeuring.");
             router.back();
         } catch (reason) {
+            if (insertedId) await supabase.from("exercise_concepts").delete().eq("id", insertedId).eq("user_id", user.id);
             setError(reason instanceof Error ? reason.message : "Oefening opslaan mislukt.");
         } finally { setBusy(false); }
     }
@@ -102,7 +119,7 @@ export default function EigenOefeningScreen() {
     return <ScrollView style={styles.root} contentContainerStyle={styles.content}>
         <Pressable onPress={() => router.back()} style={styles.back}><Ionicons name="arrow-back" color={COLORS.text} size={20}/><Text style={styles.text}>Terug</Text></Pressable>
         <Text style={styles.heading}>{id ? "Eigen oefening bekijken of aanpassen" : "Maak oefening"}</Text>
-        <Text style={styles.help}>Deze oefening is alleen voor jou zichtbaar totdat een hoofdtrainer het concept goedkeurt.</Text>
+        <Text style={styles.help}>Deze oefening en de getekende afbeelding zijn privé totdat een hoofdtrainer het concept goedkeurt. Na opslaan kies je nog "Training opslaan" in de trainingbouwer.</Text>
         {!!error && <Text style={styles.error}>{error}</Text>}
         <Text style={styles.label}>Titel</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Naam van je oefening" placeholderTextColor={COLORS.mutedText}/>
         <Text style={styles.label}>Categorie</Text><View style={styles.picker}><Picker selectedValue={category} onValueChange={setCategory}>{categories.map(item=><Picker.Item key={item.slug} label={item.title} value={item.slug}/>)}</Picker></View>
@@ -114,7 +131,7 @@ export default function EigenOefeningScreen() {
         <Text style={styles.label}>Moeilijkheid</Text><View style={styles.picker}><Picker selectedValue={difficulty} onValueChange={setDifficulty}>{DIFFICULTIES.map(x=><Picker.Item key={x} label={x} value={x}/>)}</Picker></View>
         <Text style={styles.label}>Leeftijdsgroepen</Text><View style={styles.ages}>{AGE_GROUPS.map(group=><Pressable key={group} onPress={()=>setAudience(current=>current.includes(group)?current.filter(x=>x!==group):[...current,group])} style={[styles.age,audience.includes(group)&&styles.active]}><Text style={styles.text}>{group}</Text></Pressable>)}</View>
         <Text style={styles.label}>Teken je oefening</Text>
-        <ExerciseBoardEditor key={boardKey.current} value={layout} onChange={setLayout}/>
+        <ExerciseBoardEditor key={boardKey.current} ref={boardRef} value={layout} onChange={setLayout}/>
         <Pressable style={styles.save} disabled={busy} onPress={()=>void save()}>{busy?<ActivityIndicator color="#fff"/>:<Text style={styles.saveText}>Oefening als privéconcept opslaan</Text>}</Pressable>
     </ScrollView>;
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Image,
     Pressable,
     ScrollView,
     Share,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
+import { getTrainerExercisePreviewUrl } from "../../lib/trainerExercisePreview";
 
 type ExerciseRef = {
     id: number;
@@ -33,7 +35,7 @@ type TrainingBlock = {
     duration: number;
     notes: string | null;
     exercises: ExerciseRef | null;
-    concept: { id: string; title: string } | null;
+    concept: { id: string; title: string; preview_image_path?: string | null; image_url?: string | null } | null;
 };
 
 type TrainingNote = {
@@ -144,7 +146,7 @@ export default function TrainingDetailScreen() {
             duration,
             notes,
             exercises:exercises ( id, title, image_url ),
-            concept:exercise_concepts ( id, title )
+            concept:exercise_concepts ( id, title, preview_image_path )
           `)
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
@@ -164,6 +166,12 @@ export default function TrainingDetailScreen() {
 
             let blockData: any = initialBlockData;
             let blockError: any = initialBlockError;
+            if (blockError) {
+                const withoutPreview = await supabase.from("training_blocks")
+                    .select("id, position, title, duration, notes, exercises:exercises ( id, title, image_url ), concept:exercise_concepts ( id, title )")
+                    .eq("training_id", Number(id)).order("position", { ascending: true });
+                if (!withoutPreview.error) { blockData = withoutPreview.data; blockError = null; }
+            }
             if (blockError) {
                 // Older databases may not yet have the trainer-concept relationship.
                 const legacy = await supabase.from("training_blocks")
@@ -190,16 +198,18 @@ export default function TrainingDetailScreen() {
                 teams: normalizeRelation(item.teams),
             });
 
-            const loadedBlocks = ((blockData as any[]) || []).map((block) => ({
-                id: block.id,
-                position: block.position,
-                title: block.title,
-                duration: block.duration,
-                notes: block.notes,
-                exercises: normalizeRelation(block.exercises),
-                concept: normalizeRelation(block.concept),
-            })) as TrainingBlock[];
-
+            const loadedBlocks = await Promise.all(((blockData as any[]) || []).map(async (block) => {
+                const concept: any = normalizeRelation(block.concept);
+                return {
+                    id: block.id, position: block.position, title: block.title,
+                    duration: block.duration, notes: block.notes,
+                    exercises: normalizeRelation(block.exercises),
+                    concept: concept ? {
+                        ...concept,
+                        image_url: await getTrainerExercisePreviewUrl(concept.preview_image_path),
+                    } : null,
+                } as TrainingBlock;
+            }));
             setBlocks(loadedBlocks);
 
             const loadedNote = (noteData as TrainingNote | null) ?? null;
@@ -484,6 +494,7 @@ export default function TrainingDetailScreen() {
                         </View>
 
                         <Text style={styles.blockText}>{block.exercises?.title || block.concept?.title || "Privéconcept (niet openbaar)"}</Text>
+                        {!!(block.concept?.image_url || block.exercises?.image_url) && <Image source={{ uri: block.concept?.image_url || block.exercises?.image_url || "" }} style={{ width: "100%", height: 170, marginVertical: 10, borderRadius: 12 }} resizeMode="contain" />}
                         <Text style={styles.blockTime}>{block.duration} minuten</Text>
                         {!!block.notes && <Text style={styles.blockNotes}>{block.notes}</Text>}
                         {(!!block.exercises || !!block.concept) && <Text style={styles.linkText}>Open oefening</Text>}
