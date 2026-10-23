@@ -429,7 +429,7 @@ export default function TrainingBewerkScreen() {
             (block) => block.title.trim() && (block.isBreak || block.exerciseId.trim())
         );
 
-        if (validBlocks.length === 0) {
+        if (!validBlocks.some(block => !block.isBreak)) {
             Alert.alert("Geen onderdelen", "Voeg minstens één geldig trainingsonderdeel toe.");
             return;
         }
