@@ -74,23 +74,51 @@ function Jersey({x,y,color,label}: {x:number;y:number;color?:string;label?:strin
 export default function ExerciseAnimation({layout, autoplay=false}: Props) {
     const [playing,setPlaying]=useState(autoplay);
     const [elapsed,setElapsed]=useState(0);
-    const lines=useMemo(()=>(layout?.items||[]).filter(item=>
-        ["runLine","passLine"].includes(item.type)&&typeof item.x2==="number"&&typeof item.y2==="number"
-    ).map(item=>({item,path:linePath(item),points:sampleBoardPath(linePath(item))})),[layout]);
+    const lines=useMemo(() => {
+        const ordered=(layout?.items||[]).filter(item=>
+            ["runLine","passLine"].includes(item.type)&&typeof item.x2==="number"&&typeof item.y2==="number"
+        );
+        // A dribble/run must finish before a pass/shot that starts at its endpoint.
+        // Imported images often list the pass before the corresponding run.
+        for(let i=0;i<ordered.length;i++){
+            const run=ordered[i];
+            if(run.type!=="runLine")continue;
+            const following=ordered.findIndex((candidate,index)=>index<i&&candidate.type==="passLine"&&
+                Math.hypot((candidate.x-run.x2!),(candidate.y-run.y2!))<0.085);
+            if(following>=0){ordered.splice(i,1);ordered.splice(following,0,run);}
+        }
+        return ordered.map(item=>({item,path:linePath(item),points:sampleBoardPath(linePath(item))}));
+    },[layout]);
     const stillItems=useMemo(()=>(layout?.items||[]).filter(item=>!["runLine","passLine","guideLine"].includes(item.type)),[layout]);
+    const runOwners=useMemo(()=>{
+        const players=stillItems.filter(item=>["player","attacker","defender","trainer"].includes(item.type));
+        const playerPositions=new Map(players.map(item=>[item.id,{x:item.x,y:item.y}]));
+        return lines.map(({item})=>{
+            if(item.type!=="runLine")return null;
+            const nearest=players.reduce<BoardItem|null>((best,player)=>{
+                const p=playerPositions.get(player.id)!;
+                const distance=Math.hypot(p.x-item.x,p.y-item.y);
+                const previous=best?Math.hypot(playerPositions.get(best.id)!.x-item.x,playerPositions.get(best.id)!.y-item.y):Infinity;
+                return distance<previous?player:best;
+            },null);
+            if(nearest&&item.x2!==undefined&&item.y2!==undefined)
+                playerPositions.set(nearest.id,{x:item.x2,y:item.y2});
+            return nearest?.id||null;
+        });
+    },[lines,stillItems]);
     useEffect(()=>{if(!playing)return;const timer=setInterval(()=>setElapsed(ms=>(ms+50)%8000),50);return()=>clearInterval(timer);},[playing]);
     if(!layout)return null;
     const phase=elapsed/8000*lines.length;
     const activeIndex=Math.min(Math.floor(phase),Math.max(0,lines.length-1));
     const moving=lines[activeIndex];
     const position=moving?pathPosition(moving.points,phase-activeIndex):null;
-    const closestPlayer=moving?.item.type==="runLine"?stillItems.filter(item=>
-        ["player","attacker","defender","trainer"].includes(item.type)
-    ).reduce<BoardItem|null>((best,item)=>{
-        const distance=Math.hypot(item.x-moving.item.x,item.y-moving.item.y);
-        const previous=best?Math.hypot(best.x-moving.item.x,best.y-moving.item.y):Infinity;
-        return distance<previous?item:best;
-    },null):null;
+    const playerPositions=new Map<string,Point>();
+    lines.forEach(({item,points},index)=>{
+        const owner=runOwners[index];
+        if(!owner||index>activeIndex) return;
+        const p=index===activeIndex?pathPosition(points,phase-activeIndex):pathPosition(points,1);
+        playerPositions.set(owner,{x:p.x/100,y:p.y/100});
+    });
     return <View style={styles.container}>
         <View style={styles.field}>
             <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -105,10 +133,11 @@ export default function ExerciseAnimation({layout, autoplay=false}: Props) {
                 )}
                 {stillItems.map(item=>{
                     const x=item.x*100,y=item.y*100;
-                    if(playing&&closestPlayer?.id===item.id&&moving?.item.type==="runLine")return null;
-                    if(playing&&item.type==="ball"&&moving?.item.type==="passLine")return null;
+                    // Completed dribbles keep the player at the new position.
+                    const playerAt=playerPositions.get(item.id);
+                    if(item.type==="ball"&&moving)return null;
                     if(["player","attacker","defender","trainer"].includes(item.type))
-                        return <Jersey key={item.id} x={x} y={y} color={item.shirtColor|| (item.type==="trainer"?"grey":"blue")} label={item.label|| (item.type==="trainer"?"T":"")}/>;
+                        return <Jersey key={item.id} x={(playerAt?.x??item.x)*100} y={(playerAt?.y??item.y)*100} color={item.shirtColor|| (item.type==="trainer"?"grey":"blue")} label={item.label|| (item.type==="trainer"?"T":"")}/>;
                     if(item.type==="cone")return <Polygon key={item.id} points={`${x},${y-2.2} ${x-2},${y+1.8} ${x+2},${y+1.8}`} fill="#ff7829" stroke="#fff" strokeWidth="0.5"/>;
                     if(item.type==="ball")return <Circle key={item.id} cx={x} cy={y} r={1} fill="#fff" stroke="#111" strokeWidth="0.5"/>;
                     if(item.type==="hat")return <Circle key={item.id} cx={x} cy={y} r={1.7} fill={item.color||"#f90"} stroke="#fff" strokeWidth="0.3"/>;
@@ -116,9 +145,8 @@ export default function ExerciseAnimation({layout, autoplay=false}: Props) {
                     if(item.type==="text")return <SvgText key={item.id} x={x} y={y} fill="#fff" fontSize="2.5" textAnchor="middle">{item.text||""}</SvgText>;
                     return null;
                 })}
-                {!!position&&!!moving&&(moving.item.type==="passLine"
-                    ?<Circle cx={position.x} cy={position.y} r={1.4} fill="#fff" stroke="#111" strokeWidth="0.6"/>
-                    :<Jersey x={position.x} y={position.y} color={closestPlayer?.shirtColor} label={closestPlayer?.label||"1"}/>)}
+                {!!position&&!!moving&&<Circle cx={position.x+(moving.item.type==="runLine"?1.7:0)}
+                    cy={position.y+(moving.item.type==="runLine"?1.7:0)} r={1.4} fill="#fff" stroke="#111" strokeWidth="0.6"/>}
             </Svg>
         </View>
         {lines.length?<View style={styles.controls}>
