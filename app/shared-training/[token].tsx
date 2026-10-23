@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     ImageBackground,
+    Image,
+    Modal,
+    Pressable,
     ScrollView,
     StyleSheet,
     Text,
@@ -19,6 +22,10 @@ type SharedExercise = {
     subtitle: string | null;
     difficulty: string | null;
     audience: string[] | null;
+    explanation?: string | null;
+    instructions?: string | null;
+    simplify?: string | null;
+    build_up?: string | null;
 };
 
 type SharedBlock = {
@@ -53,6 +60,7 @@ export default function SharedTrainingScreen() {
     const [training, setTraining] = useState<SharedTraining | null>(null);
     const [loading, setLoading] = useState(true);
     const [errorText, setErrorText] = useState("");
+    const [selectedExercise, setSelectedExercise] = useState<SharedExercise | null>(null);
 
     useEffect(() => {
         if (token) {
@@ -153,7 +161,8 @@ export default function SharedTrainingScreen() {
                         </View>
 
                         {block.exercise ? (
-                            <>
+                            <Pressable accessibilityRole="button" accessibilityLabel={`Bekijk oefening ${block.exercise.title}`}
+                                onPress={() => setSelectedExercise(block.exercise)} style={styles.exerciseButton}>
                                 {block.exercise.image_url ? (
                                     <ImageBackground
                                         source={{ uri: block.exercise.image_url }}
@@ -190,7 +199,12 @@ export default function SharedTrainingScreen() {
                                         </View>
                                     ))}
                                 </View>
-                            </>
+                                <View style={styles.openExerciseRow}>
+                                    <Ionicons name="expand-outline" size={17} color={COLORS.accent} />
+                                    <Text style={styles.openExerciseText}>Bekijk volledige oefening</Text>
+                                    <Ionicons name="chevron-forward" size={17} color={COLORS.accent} />
+                                </View>
+                            </Pressable>
                         ) : (
                             <Text style={styles.noExerciseText}>Geen oefening gekoppeld.</Text>
                         )}
@@ -211,6 +225,55 @@ export default function SharedTrainingScreen() {
                     </Text>
                 </View>
             </View>
+            <Modal visible={!!selectedExercise} animationType="slide" transparent
+                onRequestClose={() => setSelectedExercise(null)}>
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalPanel}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalEyebrow}>OEFENING BEKIJKEN</Text>
+                            <Pressable accessibilityRole="button" accessibilityLabel="Sluit oefening"
+                                onPress={() => setSelectedExercise(null)} style={styles.closeButton}>
+                                <Ionicons name="close" size={24} color={COLORS.text} />
+                            </Pressable>
+                        </View>
+                        <ScrollView contentContainerStyle={styles.modalContent}>
+                            {!!selectedExercise?.image_url && (
+                                <Image source={{ uri: selectedExercise.image_url }} style={styles.detailImage}
+                                    resizeMode="contain" />
+                            )}
+                            <Text style={styles.detailTitle}>{selectedExercise?.title}</Text>
+                            {!!selectedExercise?.subtitle && (
+                                <Text style={styles.detailSubtitle}>{selectedExercise.subtitle}</Text>
+                            )}
+                            <View style={styles.exerciseMetaRow}>
+                                {!!selectedExercise?.difficulty && (
+                                    <View style={styles.smallChip}>
+                                        <Text style={styles.smallChipText}>{selectedExercise.difficulty}</Text>
+                                    </View>
+                                )}
+                                {(selectedExercise?.audience || []).map((item) => (
+                                    <View key={item} style={styles.smallChip}>
+                                        <Text style={styles.smallChipText}>{item}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                            {([
+                                ["Uitleg", selectedExercise?.explanation],
+                                ["Instructies", selectedExercise?.instructions],
+                                ["Vereenvoudiging", selectedExercise?.simplify],
+                                ["Uitbouw", selectedExercise?.build_up],
+                            ] as const).map(([title, content]) =>
+                                content ? (
+                                    <View key={title} style={styles.detailSection}>
+                                        <Text style={styles.detailSectionTitle}>{title}</Text>
+                                        <Text style={styles.detailSectionText}>{content}</Text>
+                                    </View>
+                                ) : null
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
         </ScrollView>
     );
 }
@@ -432,6 +495,45 @@ const styles = StyleSheet.create({
         borderColor: COLORS.border,
         padding: SPACING.md,
     },
+    exerciseButton: {
+        borderRadius: RADIUS.lg,
+        overflow: "hidden",
+    },
+    openExerciseRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingTop: 12,
+    },
+    openExerciseText: { color: COLORS.accent, fontSize: 14, fontWeight: "800", flex: 1 },
+    modalBackdrop: {
+        flex: 1, justifyContent: "center", alignItems: "center",
+        backgroundColor: "rgba(0,0,0,0.75)", padding: 12,
+    },
+    modalPanel: {
+        backgroundColor: COLORS.background, borderRadius: RADIUS.xl,
+        width: "100%", maxWidth: 860, maxHeight: "95%", overflow: "hidden",
+        borderWidth: 1, borderColor: COLORS.border,
+    },
+    modalHeader: {
+        flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+        padding: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    },
+    modalEyebrow: { color: COLORS.primaryLight, fontWeight: "900", letterSpacing: 1, fontSize: 12 },
+    closeButton: { padding: 8, backgroundColor: COLORS.surfaceLight, borderRadius: RADIUS.pill },
+    modalContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+    detailImage: {
+        width: "100%", aspectRatio: 16 / 9, backgroundColor: COLORS.surfaceLight,
+        borderRadius: RADIUS.lg, marginBottom: SPACING.md,
+    },
+    detailTitle: { fontSize: 26, fontWeight: "900", color: COLORS.text, marginBottom: 8 },
+    detailSubtitle: { color: COLORS.primaryLight, fontSize: 16, marginBottom: 10 },
+    detailSection: {
+        backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1,
+        padding: SPACING.md, borderRadius: RADIUS.lg, marginTop: SPACING.md,
+    },
+    detailSectionTitle: { color: COLORS.text, fontWeight: "900", fontSize: 18, marginBottom: 8 },
+    detailSectionText: { color: COLORS.mutedText, fontSize: 15, lineHeight: 24 },
     footerText: {
         flex: 1,
         color: COLORS.mutedText,
