@@ -827,10 +827,14 @@ export default function TrainingNieuwScreen() {
 
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Trainingsonderdelen</Text>
-                    <Pressable style={styles.smallButton} onPress={addBlock}>
-                        <Text style={styles.smallButtonText}>Onderdeel toevoegen</Text>
-                    </Pressable>
-                    <Pressable style={styles.smallButton} onPress={addBreak}><Text style={styles.smallButtonText}>+ Pauze</Text></Pressable>
+                    <View style={styles.sectionActions}>
+                        <Pressable style={[styles.smallButton, styles.sectionActionButton]} onPress={addBlock}>
+                            <Text style={styles.smallButtonText}>Onderdeel toevoegen</Text>
+                        </Pressable>
+                        <Pressable style={[styles.smallButton, styles.sectionActionButton]} onPress={addBreak}>
+                            <Text style={styles.smallButtonText}>+ Pauze</Text>
+                        </Pressable>
+                    </View>
                 </View>
 
                 {blocks.map((block, index) => (
@@ -1107,10 +1111,20 @@ const styles = StyleSheet.create({
     sectionHeader: {
         marginTop: SPACING.sm,
         marginBottom: SPACING.md,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
         gap: 12,
+    },
+    sectionActions: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        alignItems: "stretch",
+        gap: 10,
+        width: "100%",
+    },
+    sectionActionButton: {
+        flexGrow: 1,
+        flexBasis: 145,
+        justifyContent: "center",
+        minHeight: 44,
     },
     sectionTitle: {
         color: COLORS.text,
