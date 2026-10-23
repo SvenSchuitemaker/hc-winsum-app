@@ -25,6 +25,8 @@ type TrainingRow = {
     id: number;
     title: string;
     training_date: string | null;
+    start_time?: string | null;
+    is_prepared?: boolean;
     team_id: number | null;
     teams: TeamRelation | null;
 };
@@ -145,6 +147,8 @@ export default function PlanningScreen() {
   id,
   title,
   training_date,
+  start_time,
+  is_prepared,
   team_id,
   teams (
     id,
@@ -362,8 +366,9 @@ export default function PlanningScreen() {
                                         >
                                             <Text style={styles.trainingTitle}>{training.title}</Text>
                                             <Text style={styles.trainingDate}>
-                                                {formatDateForDisplay(training.training_date)}
+                                                {formatDateForDisplay(training.training_date)} {training.start_time ? `om ${training.start_time.slice(0,5)}` : ""}
                                             </Text>
+                                            {training.is_prepared === false && <Text style={{color:"#FFD166",fontWeight:"800",marginBottom:4}}>Nog voorbereiden · herinneringen aan</Text>}
                                             <Text style={styles.trainingTeam}>
                                                 Team: {training.teams?.name || "Geen team"}
                                             </Text>

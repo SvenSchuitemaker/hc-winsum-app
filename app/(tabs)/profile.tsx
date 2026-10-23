@@ -255,6 +255,17 @@ export default function ProfileScreen() {
             <View style={styles.card}>
                 <Text style={styles.title}>Profiel</Text>
 
+                <Pressable style={[styles.dashboardButton,{marginBottom:14}]} onPress={() => router.push("/notifications")}>
+                    <View style={styles.dashboardButtonIcon}>
+                        <Ionicons name="notifications-outline" size={24} color={COLORS.text} />
+                    </View>
+                    <View style={styles.dashboardButtonTextWrap}>
+                        <Text style={styles.dashboardButtonTitle}>Mijn meldingen</Text>
+                        <Text style={styles.dashboardButtonText}>Bekijk herinneringen en schakel pushmeldingen in.</Text>
+                    </View>
+                    <Ionicons name="chevron-forward-outline" size={22} color={COLORS.primaryLight} />
+                </Pressable>
+
                 {canViewDashboard && (
                     <Pressable
                         style={styles.dashboardButton}
