@@ -289,20 +289,24 @@ export default function ExerciseDetailScreen() {
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={[styles.pageContent, isDesktop && styles.pageContentDesktop]}>
-                <View style={[styles.imageWrap, isDesktop && styles.imageWrapDesktop]}>
-                    <Image
-                        source={{ uri: exercise.image_url || fallbackImage }}
-                        style={styles.image}
-                        resizeMode="contain"
-                    />
-                </View>
+                {showAnimation && exercise.board_layout ? (
+                    <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url}/>
+                ) : (
+                    <View style={[styles.imageWrap, isDesktop && styles.imageWrapDesktop]}>
+                        <Image
+                            source={{ uri: exercise.image_url || fallbackImage }}
+                            style={styles.image}
+                            resizeMode="contain"
+                        />
+                    </View>
+                )}
 
                 {!!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
                     <Pressable style={{backgroundColor:COLORS.primary,padding:13,borderRadius:12,marginBottom:12}}
                         onPress={() => setShowAnimation(value => !value)}>
                         <Text style={{color:"#fff",fontWeight:"900",textAlign:"center"}}>{showAnimation ? "Animatie sluiten" : "▶ Bekijk oefeninganimatie"}</Text>
                     </Pressable>
-                    {showAnimation && <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url}/>}
+
                 </>}
                 <View style={styles.titleRow}>
                     <View style={styles.titleWrap}>
