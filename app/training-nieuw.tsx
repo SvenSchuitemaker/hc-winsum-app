@@ -22,6 +22,7 @@ import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
 import { takeCreatedTrainerExercise } from "../lib/trainerExerciseSelection";
+import { getTrainerExercisePreviewUrl } from "../lib/trainerExercisePreview";
 
 type ExerciseOption = {
     id: number | string;
@@ -196,6 +197,7 @@ export default function TrainingNieuwScreen() {
     const [allExercises, setAllExercises] = useState<ExerciseOption[]>([]);
     const [favoriteExercises, setFavoriteExercises] = useState<ExerciseOption[]>([]);
     const [ownExercises, setOwnExercises] = useState<ExerciseOption[]>([]);
+    const [exerciseAddedMessage, setExerciseAddedMessage] = useState(false);
     const [exerciseSource, setExerciseSource] = useState<"all" | "favorites" | "own">("all");
     const [exerciseSelectorBlockId, setExerciseSelectorBlockId] = useState<string | null>(null);
     const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState<string>("all");
@@ -219,17 +221,32 @@ export default function TrainingNieuwScreen() {
         let active = true;
         async function refreshOwn() {
             if (!supabase || !user?.id) return;
-            const { data, error } = await supabase.from("exercise_concepts")
-                .select("id, title, category_slug, status, published_exercise_id")
+            const result = await supabase.from("exercise_concepts")
+                .select("id, title, category_slug, status, published_exercise_id, preview_image_path")
                 .eq("user_id", user.id).in("status", ["ready", "rejected"]).order("created_at", { ascending: false });
+            let data: any[] = result.data || [];
+            let error = result.error;
+            if (error) {
+                // Keep existing concepts selectable until the preview migration is installed.
+                const fallback = await supabase.from("exercise_concepts")
+                    .select("id, title, category_slug, status, published_exercise_id")
+                    .eq("user_id", user.id).in("status", ["ready", "rejected"]).order("created_at", { ascending: false });
+                if (!fallback.error) { data = fallback.data || []; error = null; }
+            }
             if (!active) return;
             if (error) { Alert.alert("Eigen oefeningen laden mislukt", error.message); return; }
-            setOwnExercises((data || []).filter(row => row.status === "ready" && !row.published_exercise_id)
-                .map(row => ({ id: `concept:${row.id}`, title: row.title, category_slug: row.category_slug, image_url: null, isConcept: true })));
+            const ownRows = (data || []).filter(row => row.status === "ready" && !row.published_exercise_id);
+            const previews = await Promise.all(ownRows.map(row => getTrainerExercisePreviewUrl(row.preview_image_path)));
+            if (!active) return;
+            setOwnExercises(ownRows.map((row, index) => ({
+                id: `concept:${row.id}`, title: row.title, category_slug: row.category_slug,
+                image_url: previews[index], isConcept: true,
+            })));
             const created = takeCreatedTrainerExercise();
             if (created) {
                 setBlocks(current => current.map(block => block.localId === created.blockId
                     ? { ...block, exerciseId: `concept:${created.conceptId}` } : block));
+                setExerciseAddedMessage(true);
                 setExerciseSource("own");
                 setExerciseCategoryFilter("all");
             }
@@ -994,7 +1011,7 @@ export default function TrainingNieuwScreen() {
                                                 ]}
                                                 onPress={() => selectExercise(exercise)}
                                             >
-                                                {exercise.isConcept ? (
+                                                {exercise.isConcept && !exercise.image_url ? (
                                                     <View style={[styles.exerciseChoiceImage, { backgroundColor: COLORS.surfaceLight, justifyContent:"center", alignItems:"center" }]}>
                                                         <Ionicons name="create-outline" size={32} color={COLORS.primaryLight}/>
                                                         {selected && <Ionicons name="checkmark-circle" size={19} color={COLORS.primaryLight}/>}
@@ -1026,6 +1043,7 @@ export default function TrainingNieuwScreen() {
                     </View>
                 </Modal>
 
+                {exerciseAddedMessage && <Text style={{ color: COLORS.primaryLight, fontWeight: "800", marginBottom: 12 }}>Je eigen oefening is toegevoegd aan dit onderdeel. Vergeet niet om ook de training hieronder op te slaan.</Text>}
                 <Pressable style={styles.button} onPress={handleSave} disabled={saving}>
                     {saving ? (
                         <ActivityIndicator color={COLORS.text} />

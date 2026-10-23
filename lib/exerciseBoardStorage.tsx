@@ -106,6 +106,7 @@ async function captureWebBoard(target: HTMLElement, layout: ExerciseBoardLayout)
 export async function uploadExerciseBoardPreview(params: {
     exerciseId: number;
     title: string;
+    privatePathPrefix?: string;
     boardRef: ExerciseBoardEditorRef | null;
     boardLayout?: ExerciseBoardLayout;
 }) {
@@ -148,10 +149,11 @@ export async function uploadExerciseBoardPreview(params: {
             .replace(/[^a-z0-9]+/g, "-")
             .replace(/^-+|-+$/g, "") || "oefening";
 
-    const filePath = `${params.exerciseId}/${safeTitle}-${Date.now()}.png`;
+    const filePath = `${params.privatePathPrefix || params.exerciseId}/${safeTitle}-${Date.now()}.png`;
+    const bucket = params.privatePathPrefix ? "trainer-exercise-previews" : BUCKET_NAME;
 
     const { error: uploadError } = await supabase.storage
-        .from(BUCKET_NAME)
+        .from(bucket)
         .upload(filePath, arrayBuffer, {
             contentType: "image/png",
             upsert: true,
@@ -161,6 +163,7 @@ export async function uploadExerciseBoardPreview(params: {
         throw uploadError;
     }
 
+    if (params.privatePathPrefix) return filePath;
     const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
     return data.publicUrl;
 }
