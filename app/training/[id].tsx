@@ -117,7 +117,7 @@ export default function TrainingDetailScreen() {
 
             const [
                 { data: trainingData, error: trainingError },
-                { data: blockData, error: blockError },
+                { data: initialBlockData, error: initialBlockError },
                 { data: noteData, error: noteError },
             ] = await Promise.all([
                 supabase
@@ -161,6 +161,16 @@ export default function TrainingDetailScreen() {
                     .eq("training_id", Number(id))
                     .maybeSingle(),
             ]);
+
+            let blockData: any = initialBlockData;
+            let blockError: any = initialBlockError;
+            if (blockError) {
+                // Older databases may not yet have the trainer-concept relationship.
+                const legacy = await supabase.from("training_blocks")
+                    .select("id, position, title, duration, notes, exercises:exercises ( id, title, image_url )")
+                    .eq("training_id", Number(id)).order("position", { ascending: true });
+                if (!legacy.error) { blockData = legacy.data; blockError = null; }
+            }
 
             if (trainingError) throw trainingError;
             if (blockError) throw blockError;
@@ -452,6 +462,7 @@ export default function TrainingDetailScreen() {
                     </Pressable>
                 </View>
 
+                {blocks.length === 0 && <Text style={{ color: "#FF8A8A", marginVertical: 12 }}>Deze training heeft geen opgeslagen onderdelen. Maak de training opnieuw of verwijder dit incomplete item.</Text>}
                 {blocks.map((block, index) => (
                     <Pressable
                         key={`${block.position}-${block.title}`}

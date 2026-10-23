@@ -120,6 +120,7 @@ export default function TrainingBewerkScreen() {
     const [blocks, setBlocks] = useState<BlockDraft[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState("");
 
     const exercises = useMemo(() => {
         return exerciseSource === "favorites" ? favoriteExercises : exerciseSource === "own" ? ownExercises : allExercises;
@@ -173,7 +174,7 @@ export default function TrainingBewerkScreen() {
                 { data: categoryData, error: categoryError },
                 { data: exerciseData, error: exerciseError },
                 { data: trainingData, error: trainingError },
-                { data: blockData, error: blockError },
+                { data: initialBlockData, error: initialBlockError },
             ] = await Promise.all([
                 supabase.from("teams").select("id, name").order("name", { ascending: true }),
                 supabase.from("categories").select("slug, title").order("id", { ascending: true }),
@@ -203,6 +204,16 @@ export default function TrainingBewerkScreen() {
                     .eq("training_id", Number(id))
                     .order("position", { ascending: true }),
             ]);
+
+            let blockData: any = initialBlockData;
+            let blockError: any = initialBlockError;
+            if (blockError) {
+                // Backwards compatibility while the private-concepts migration is pending.
+                const legacy = await supabase.from("training_blocks")
+                    .select("position, title, exercise_id, duration, notes")
+                    .eq("training_id", Number(id)).order("position", { ascending: true });
+                if (!legacy.error) { blockData = legacy.data; blockError = null; }
+            }
 
             if (teamsError) throw teamsError;
             if (categoryError) throw categoryError;
@@ -376,6 +387,7 @@ export default function TrainingBewerkScreen() {
     function conceptId(value: string | undefined) { return value?.startsWith("concept:") ? value.slice(8) : null; }
 
     async function handleSave() {
+        setSaveError("");
         if (!title.trim()) {
             Alert.alert("Ontbrekende titel", "Geef je training een naam.");
             return;
@@ -400,6 +412,11 @@ export default function TrainingBewerkScreen() {
 
             if (!supabase) {
                 throw new Error("Supabase is niet geladen.");
+            }
+
+            const { error: conceptSchemaError } = await supabase.from("training_blocks").select("concept_id").limit(0);
+            if (conceptSchemaError && validBlocks.some(block => conceptId(block.exerciseId))) {
+                throw new Error("Eigen oefeningen kunnen nog niet worden opgeslagen: de Supabase-migratie voor concept_id ontbreekt. De bestaande training is niet gewijzigd.");
             }
 
             const first = validBlocks[0];
@@ -436,7 +453,7 @@ export default function TrainingBewerkScreen() {
                     position: index + 1,
                     title: block.title.trim(),
                     exercise_id: publishedId(block.exerciseId),
-                    concept_id: conceptId(block.exerciseId),
+                    ...(conceptSchemaError ? {} : { concept_id: conceptId(block.exerciseId) }),
                     duration: Number(block.duration) || 0,
                     notes: block.notes.trim() || null,
                 }))
@@ -447,10 +464,9 @@ export default function TrainingBewerkScreen() {
             Alert.alert("Gelukt", "Training bijgewerkt.");
             router.replace(`/training/${id}`);
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Bijwerken mislukt."
-            );
+            const message = error instanceof Error ? error.message : "Bijwerken mislukt.";
+            setSaveError(message);
+            if (Platform.OS !== "web") Alert.alert("Fout", message);
         } finally {
             setSaving(false);
         }
@@ -468,6 +484,7 @@ export default function TrainingBewerkScreen() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.card}>
                 <Text style={styles.title}>Training bewerken</Text>
+                {!!saveError && <Text style={{ color: "#FF8A8A", fontWeight: "700", marginBottom: 12 }}>{saveError}</Text>}
 
                 <Text style={styles.label}>Naam training</Text>
                 <TextInput
