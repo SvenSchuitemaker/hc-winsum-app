@@ -618,7 +618,7 @@ export default function TrainingNieuwScreen() {
             return;
         }
 
-        if (!trainingDate || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(startTime)) {
+        if (!trainingDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
             Alert.alert("Datum en tijd ontbreken", "Vul de trainingsdatum en begintijd in voor de herinneringen.");
             return;
         }
