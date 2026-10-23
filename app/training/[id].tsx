@@ -263,7 +263,6 @@ export default function TrainingDetailScreen() {
             await Share.share({
                 title: training.title,
                 message: shareText,
-                url: publicUrl,
             });
         } catch (error) {
             Alert.alert("Fout", error instanceof Error ? error.message : "Delen mislukt.");
