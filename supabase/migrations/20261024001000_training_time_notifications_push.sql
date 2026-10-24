@@ -64,7 +64,7 @@ values (1, encode(gen_random_bytes(32), 'hex')) on conflict (id) do nothing;
 -- Database-triggered notifications; not callable by clients.
 create or replace function public.notify_head_trainers()
 returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_club bigint; v_title text; v_kind text; v_key text; v_target text;
+declare v_club bigint; v_title text; v_kind text; v_key text; v_target text; v_author uuid;
 begin
   if tg_table_name = 'exercise_concepts' then
     if new.status <> 'ready' or (tg_op='UPDATE' and old.status='ready') then return new; end if;
@@ -73,6 +73,7 @@ begin
     v_kind := 'concept';
     v_key := 'concept:' || new.id::text;
     v_target := '/dashboard';
+    v_author := new.user_id;
   elsif tg_table_name = 'training_notes' then
     if coalesce(btrim(new.what_went_well),'')='' and coalesce(btrim(new.what_to_improve),'')=''
        and coalesce(btrim(new.next_time_notes),'')='' and coalesce(btrim(new.attendance_note),'')='' then
@@ -89,6 +90,7 @@ begin
     v_kind := 'evaluation';
     v_key := 'evaluation:' || new.id::text || ':' || (extract(epoch from new.updated_at)::bigint)::text;
     v_target := '/training/' || new.training_id::text;
+    v_author := new.author_user_id;
   end if;
   if v_club is null then return new; end if;
   insert into public.app_notifications(user_id, club_id, kind, event_key, title, body, target_path)
@@ -98,7 +100,7 @@ begin
       else 'Een trainer heeft ' || coalesce(v_title,'een training') || ' geëvalueerd.' end,
     v_target
   from public.profiles p
-  where p.club_id = v_club and p.role in ('head_trainer','super_admin') and p.id <> new.user_id
+  where p.club_id = v_club and p.role in ('head_trainer','super_admin') and p.id <> v_author
   on conflict (user_id,event_key) do nothing;
   return new;
 end $$;
