@@ -57,7 +57,7 @@ export default function ExerciseBoardCanvas({
 }: Props) {
     return (
         <View ref={captureTargetRef} collapsable={false}>
-            <View style={boardStyle} onLayout={onLayout} {...panHandlers}>
+            <View style={[boardStyle, !isSelectMode && { touchAction: "none" }]} onLayout={onLayout} {...panHandlers}>
                 <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {fieldOrientation === "top" ? renderTopField() : renderHalfField()}
                     {backgroundImageUrl && showBackground && (
