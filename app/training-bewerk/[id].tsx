@@ -21,6 +21,7 @@ import {
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
+import TrainingStartTimePicker from "../../components/TrainingStartTimePicker";
 import { takeCreatedTrainerExercise } from "../../lib/trainerExerciseSelection";
 import { getTrainerExercisePreviewUrl } from "../../lib/trainerExercisePreview";
 
@@ -46,6 +47,8 @@ type TrainingData = {
     id: number;
     title: string;
     training_date: string | null;
+    start_time?: string | null;
+    is_prepared?: boolean;
     team_id: number | null;
     warmup_exercise_id: number | null;
     warmup_duration: number;
@@ -107,6 +110,7 @@ export default function TrainingBewerkScreen() {
 
     const [title, setTitle] = useState("");
     const [trainingDate, setTrainingDate] = useState<Date | null>(null);
+    const [startTime, setStartTime] = useState("");
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [teams, setTeams] = useState<TeamOption[]>([]);
@@ -207,6 +211,8 @@ export default function TrainingBewerkScreen() {
             id,
             title,
             training_date,
+            start_time,
+            is_prepared,
             team_id,
             warmup_exercise_id,
             warmup_duration,
@@ -277,6 +283,7 @@ export default function TrainingBewerkScreen() {
 
             setTitle(training.title || "");
             setTrainingDate(parseDatabaseDate(training.training_date));
+            setStartTime(training.start_time?.slice(0,5) || "");
             setSelectedTeamId(training.team_id ? String(training.team_id) : "");
 
             if (trainingBlocks.length > 0) {
@@ -413,7 +420,7 @@ export default function TrainingBewerkScreen() {
     function publishedId(value: string | undefined) { return value && !value.startsWith("concept:") ? Number(value) : null; }
     function conceptId(value: string | undefined) { return value?.startsWith("concept:") ? value.slice(8) : null; }
 
-    async function handleSave() {
+    async function handleSave(asDraft = false) {
         setSaveError("");
         if (!title.trim()) {
             Alert.alert("Ontbrekende titel", "Geef je training een naam.");
@@ -429,11 +436,15 @@ export default function TrainingBewerkScreen() {
             (block) => block.title.trim() && (block.isBreak || block.exerciseId.trim())
         );
 
-        if (!validBlocks.some(block => !block.isBreak)) {
+        if (!asDraft && !validBlocks.some(block => !block.isBreak)) {
             Alert.alert("Geen onderdelen", "Voeg minstens één geldig trainingsonderdeel toe.");
             return;
         }
 
+        if (!trainingDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+            Alert.alert("Datum en tijd ontbreken", "Vul de trainingsdatum en begintijd in voor de herinneringen.");
+            return;
+        }
         try {
             setSaving(true);
 
@@ -456,6 +467,8 @@ export default function TrainingBewerkScreen() {
                 .update({
                     title: title.trim(),
                     training_date: formatDateForDatabase(trainingDate),
+                    start_time: startTime,
+                    is_prepared: !asDraft,
                     team_id: Number(selectedTeamId),
                     warmup_exercise_id: publishedId(first?.exerciseId),
                     warmup_duration: Number(first?.duration || 0),
@@ -558,6 +571,12 @@ export default function TrainingBewerkScreen() {
                         onChange={handleDateChange}
                     />
                 )}
+
+                <Text style={styles.label}>Begintijd van de training</Text>
+                <TrainingStartTimePicker value={startTime} onChange={setStartTime} />
+                <Text style={{color:COLORS.mutedText,fontSize:13,marginBottom:16}}>
+                    De herinneringen worden berekend vanaf deze begintijd.
+                </Text>
 
                 <Text style={styles.label}>Bron oefeningen</Text>
                 <View style={styles.filterRow}>
@@ -757,12 +776,16 @@ export default function TrainingBewerkScreen() {
                 </Modal>
 
                 {exerciseAddedMessage && <Text style={{ color: COLORS.primaryLight, fontWeight: "800", marginBottom: 12 }}>Je eigen oefening is toegevoegd aan dit onderdeel. Vergeet niet om ook de training hieronder op te slaan.</Text>}
-                <Pressable style={styles.button} onPress={handleSave} disabled={saving}>
+                <Pressable style={styles.button} onPress={() => handleSave(false)} disabled={saving}>
                     {saving ? (
                         <ActivityIndicator color={COLORS.text} />
                     ) : (
                         <Text style={styles.buttonText}>Wijzigingen opslaan</Text>
                     )}
+                </Pressable>
+                <Pressable style={[styles.button, {backgroundColor:COLORS.surfaceLight,marginTop:12,borderWidth:1,borderColor:COLORS.border}]}
+                    onPress={() => handleSave(true)} disabled={saving}>
+                    <Text style={styles.buttonText}>Als concept plannen (herinneringen aan)</Text>
                 </Pressable>
             </View>
         </ScrollView>
