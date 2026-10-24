@@ -95,6 +95,9 @@ export function useBoardPanResponder(params: Params) {
             return false;
         },
 
+        // Keep the drawing gesture owned by the board instead of handing it to a parent ScrollView.
+        onPanResponderTerminationRequest: () => params.isSelectMode,
+
         onPanResponderGrant: () => {
             if (params.isSelectMode) {
                 params.drawingItemIdRef.current = null;
