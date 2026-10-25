@@ -18,6 +18,7 @@ export type ToolType =
     | "bounceRunLine"
     | "passeerRunLine"
     | "passLine"
+    | "arcRunLine"
     | "arcPassLine"
     | "guideLine"
     | "runPassPair"
@@ -62,6 +63,7 @@ export type BoardItem = {
     color?: HatColor;
     rotation?: number;
     lineStyle?: LineStyle;
+    arcDirection?: 1 | -1;
     shirtColor?: "black" | "orange" | "blue" | "grey" | "white" | "red" | "green";
     label?: string;
     text?: string;
