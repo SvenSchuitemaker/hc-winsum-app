@@ -3,6 +3,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -12,6 +13,7 @@ import {
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
+import TrainingStartTimePicker from "../components/TrainingStartTimePicker";
 
 type TeamRow = {
     id: number;
@@ -30,6 +32,9 @@ type TeamTrainerRow = {
     team_id: number;
     user_id: string;
 };
+
+type ScheduleRow = { id: number; team_id: number; weekday: number; start_time: string };
+const WEEKDAYS = ["Zondag", "Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag"];
 
 type TrainingRow = {
     id: number;
@@ -90,6 +95,11 @@ export default function WeekOverviewScreen() {
     const [trainers, setTrainers] = useState<TrainerRow[]>([]);
     const [links, setLinks] = useState<TeamTrainerRow[]>([]);
     const [trainings, setTrainings] = useState<TrainingRow[]>([]);
+    const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
+    const [scheduleTeamId, setScheduleTeamId] = useState<number | null>(null);
+    const [scheduleWeekday, setScheduleWeekday] = useState(1);
+    const [scheduleTime, setScheduleTime] = useState("18:00");
+    const [savingSchedule, setSavingSchedule] = useState(false);
     const [loading, setLoading] = useState(true);
     const [errorText, setErrorText] = useState("");
 
@@ -155,8 +165,11 @@ export default function WeekOverviewScreen() {
             if (teamIds.length === 0) {
                 setLinks([]);
                 setTrainings([]);
+                setSchedule([]);
                 return;
             }
+
+            setScheduleTeamId((current) => current && teamIds.includes(current) ? current : teamIds[0]);
 
             const start = toYmd(weekStart);
             const end = toYmd(addDays(weekStart, 6));
@@ -164,6 +177,7 @@ export default function WeekOverviewScreen() {
             const [
                 { data: linkData, error: linkError },
                 { data: trainingData, error: trainingError },
+                { data: scheduleData, error: scheduleError },
             ] = await Promise.all([
                 supabase
                     .from("team_trainers")
@@ -176,13 +190,20 @@ export default function WeekOverviewScreen() {
                     .gte("training_date", start)
                     .lte("training_date", end)
                     .order("training_date", { ascending: true }),
+                supabase.from("team_training_schedule")
+                    .select("id, team_id, weekday, start_time")
+                    .in("team_id", teamIds)
+                    .order("weekday", { ascending: true })
+                    .order("start_time", { ascending: true }),
             ]);
 
             if (linkError) throw linkError;
             if (trainingError) throw trainingError;
+            if (scheduleError) throw scheduleError;
 
             setLinks((linkData as TeamTrainerRow[]) || []);
             setTrainings((trainingData as TrainingRow[]) || []);
+            setSchedule((scheduleData as ScheduleRow[]) || []);
         } catch (error) {
             setErrorText(
                 error instanceof Error ? error.message : "Weekoverzicht laden mislukt."
@@ -190,6 +211,27 @@ export default function WeekOverviewScreen() {
         } finally {
             setLoading(false);
         }
+    }
+
+    async function addSchedule() {
+        if (!supabase || !scheduleTeamId || !/^([01]\d|2[0-3]):[0-5]\d$/.test(scheduleTime)) {
+            Alert.alert("Ongeldige tijd", "Kies een team en een geldige begintijd.");
+            return;
+        }
+        setSavingSchedule(true);
+        const { error } = await supabase.from("team_training_schedule").insert({
+            team_id: scheduleTeamId, weekday: scheduleWeekday, start_time: scheduleTime,
+        });
+        setSavingSchedule(false);
+        if (error) Alert.alert("Rooster opslaan mislukt", error.code === "23505" ? "Deze trainingstijd staat al in het rooster." : error.message);
+        else void loadWeek();
+    }
+
+    async function removeSchedule(id: number) {
+        if (!supabase) return;
+        const { error } = await supabase.from("team_training_schedule").delete().eq("id", id);
+        if (error) Alert.alert("Verwijderen mislukt", error.message);
+        else setSchedule((current) => current.filter((entry) => entry.id !== id));
     }
 
     const trainerById = useMemo(
@@ -280,6 +322,41 @@ export default function WeekOverviewScreen() {
                     </View>
                 </View>
 
+                <View style={styles.teamCard}>
+                    <Text style={styles.title}>Vast trainingsrooster</Text>
+                    <Text style={styles.heroText}>Stel per team de vaste trainingsdagen en tijden in. Trainers krijgen automatisch herinneringen 24 uur en 1 uur vooraf als de training nog niet klaarstaat.</Text>
+                    <Text style={styles.scheduleLabel}>Team</Text>
+                    <View style={styles.scheduleOptions}>
+                        {teams.map((team) => <Pressable key={team.id} onPress={() => setScheduleTeamId(team.id)} style={[styles.scheduleChip, scheduleTeamId === team.id && styles.scheduleChipActive]}>
+                            <Text style={styles.scheduleChipText}>{team.name}</Text>
+                        </Pressable>)}
+                    </View>
+                    <Text style={styles.scheduleLabel}>Trainingsdag</Text>
+                    <View style={styles.scheduleOptions}>
+                        {WEEKDAYS.map((day, index) => <Pressable key={day} onPress={() => setScheduleWeekday(index)} style={[styles.scheduleChip, scheduleWeekday === index && styles.scheduleChipActive]}>
+                            <Text style={styles.scheduleChipText}>{day}</Text>
+                        </Pressable>)}
+                    </View>
+                    <Text style={styles.scheduleLabel}>Begintijd</Text>
+                    <TrainingStartTimePicker value={scheduleTime} onChange={setScheduleTime} />
+                    <Pressable disabled={savingSchedule} onPress={() => void addSchedule()} style={styles.scheduleAdd}>
+                        <Ionicons name="add-circle-outline" size={20} color={COLORS.text} />
+                        <Text style={styles.scheduleChipText}>{savingSchedule ? "Opslaan..." : "Trainingstijd toevoegen"}</Text>
+                    </Pressable>
+                    {teams.map((team) => {
+                        const entries = schedule.filter((entry) => entry.team_id === team.id);
+                        return entries.length ? <View key={team.id} style={styles.scheduleGroup}>
+                            <Text style={styles.teamName}>{team.name}</Text>
+                            {entries.map((entry) => <View key={entry.id} style={styles.scheduleEntry}>
+                                <Text style={styles.scheduleEntryText}>{WEEKDAYS[entry.weekday]} · {entry.start_time.slice(0, 5)}</Text>
+                                <Pressable accessibilityLabel="Trainingstijd verwijderen" onPress={() => void removeSchedule(entry.id)} style={styles.scheduleRemove}>
+                                    <Ionicons name="trash-outline" size={20} color="#F29BA8" />
+                                </Pressable>
+                            </View>)}
+                        </View> : null;
+                    })}
+                </View>
+
                 <View style={styles.summaryRow}>
                     <View style={styles.summaryCard}>
                         <Text style={styles.summaryNumber}>{teams.length}</Text>
@@ -345,6 +422,16 @@ export default function WeekOverviewScreen() {
 }
 
 const styles = StyleSheet.create({
+    scheduleLabel: { color: COLORS.primaryLight, fontSize: 14, fontWeight: "800", marginBottom: 8 },
+    scheduleOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+    scheduleChip: { paddingHorizontal: 13, paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.surfaceLight, borderWidth: 1, borderColor: COLORS.border },
+    scheduleChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primaryLight },
+    scheduleChipText: { color: COLORS.text, fontWeight: "800" },
+    scheduleAdd: { backgroundColor: COLORS.primary, padding: 14, borderRadius: 12, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginBottom: 16 },
+    scheduleGroup: { paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 10 },
+    scheduleEntry: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
+    scheduleEntryText: { color: COLORS.text, fontSize: 14 },
+    scheduleRemove: { padding: 9 },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
     page: { width: "100%", maxWidth: 1000, alignSelf: "center" },

@@ -451,10 +451,25 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                         <>
                             <Text style={styles.helperText}>Geselecteerd: {selectedItem.type}</Text>
                             {(selectedItem.type === "runLine" || selectedItem.type === "passLine") && selectedItem.lineStyle === "arc" && (
-                                <Pressable style={styles.actionButton} onPress={() => updateItem(selectedItem.id, { arcDirection: selectedItem.arcDirection === -1 ? 1 : -1 })}>
-                                    <Ionicons name="swap-horizontal-outline" size={18} color={COLORS.text} />
-                                    <Text style={styles.helperText}>Spiegel boog</Text>
-                                </Pressable>
+                                <View style={styles.arcMirrorPanel}>
+                                    <View style={styles.arcMirrorHeader}>
+                                        <Ionicons name="git-compare-outline" size={20} color={COLORS.primaryLight} />
+                                        <Text style={styles.arcMirrorTitle}>Boogrichting</Text>
+                                    </View>
+                                    <Text style={styles.arcMirrorHint}>Kies aan welke kant de boog loopt. De begin- en eindpunten blijven staan.</Text>
+                                    <View style={styles.arcMirrorChoices}>
+                                        {([1, -1] as const).map((direction) => {
+                                            const active = (selectedItem.arcDirection === -1 ? -1 : 1) === direction;
+                                            return <Pressable key={direction} accessibilityRole="button" accessibilityState={{ selected: active }}
+                                                onPress={() => updateItem(selectedItem.id, { arcDirection: direction })}
+                                                style={[styles.arcMirrorChoice, active && styles.arcMirrorChoiceActive]}>
+                                                <Ionicons name={direction === 1 ? "arrow-undo-outline" : "arrow-redo-outline"} size={20} color={active ? COLORS.text : COLORS.primaryLight} />
+                                                <Text style={styles.arcMirrorChoiceText}>{direction === 1 ? "Kant 1" : "Kant 2"}</Text>
+                                                {active && <Ionicons name="checkmark-circle" size={17} color={COLORS.text} />}
+                                            </Pressable>;
+                                        })}
+                                    </View>
+                                </View>
                             )}
 
                             {selectedItem.type === "hat" && (
@@ -663,6 +678,14 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
 );
 
 const styles = StyleSheet.create({
+    arcMirrorPanel: { backgroundColor: COLORS.surfaceLight, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 14, marginVertical: 10 },
+    arcMirrorHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 5 },
+    arcMirrorTitle: { color: COLORS.text, fontSize: 16, fontWeight: "800" },
+    arcMirrorHint: { color: COLORS.mutedText, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+    arcMirrorChoices: { flexDirection: "row", gap: 10 },
+    arcMirrorChoice: { flex: 1, minHeight: 48, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 8 },
+    arcMirrorChoiceActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primaryLight },
+    arcMirrorChoiceText: { color: COLORS.text, fontSize: 13, fontWeight: "800" },
     container: {
         backgroundColor: COLORS.background,
     },
