@@ -21,7 +21,6 @@ import {
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
-import TrainingStartTimePicker from "../../components/TrainingStartTimePicker";
 import { takeCreatedTrainerExercise } from "../../lib/trainerExerciseSelection";
 import { getTrainerExercisePreviewUrl } from "../../lib/trainerExercisePreview";
 
@@ -110,7 +109,6 @@ export default function TrainingBewerkScreen() {
 
     const [title, setTitle] = useState("");
     const [trainingDate, setTrainingDate] = useState<Date | null>(null);
-    const [startTime, setStartTime] = useState("");
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [teams, setTeams] = useState<TeamOption[]>([]);
@@ -283,7 +281,6 @@ export default function TrainingBewerkScreen() {
 
             setTitle(training.title || "");
             setTrainingDate(parseDatabaseDate(training.training_date));
-            setStartTime(training.start_time?.slice(0,5) || "");
             setSelectedTeamId(training.team_id ? String(training.team_id) : "");
 
             if (trainingBlocks.length > 0) {
@@ -441,8 +438,8 @@ export default function TrainingBewerkScreen() {
             return;
         }
 
-        if (!trainingDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
-            Alert.alert("Datum en tijd ontbreken", "Vul de trainingsdatum en begintijd in voor de herinneringen.");
+        if (!trainingDate) {
+            Alert.alert("Datum ontbreekt", "Kies eerst een trainingsdatum.");
             return;
         }
         try {
@@ -467,7 +464,6 @@ export default function TrainingBewerkScreen() {
                 .update({
                     title: title.trim(),
                     training_date: formatDateForDatabase(trainingDate),
-                    start_time: startTime,
                     is_prepared: !asDraft,
                     team_id: Number(selectedTeamId),
                     warmup_exercise_id: publishedId(first?.exerciseId),
@@ -572,10 +568,8 @@ export default function TrainingBewerkScreen() {
                     />
                 )}
 
-                <Text style={styles.label}>Begintijd van de training</Text>
-                <TrainingStartTimePicker value={startTime} onChange={setStartTime} />
                 <Text style={{color:COLORS.mutedText,fontSize:13,marginBottom:16}}>
-                    De herinneringen worden berekend vanaf deze begintijd.
+                    De trainingstijden en herinneringen worden centraal beheerd door de hoofdtrainer.
                 </Text>
 
                 <Text style={styles.label}>Bron oefeningen</Text>

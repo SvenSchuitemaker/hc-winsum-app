@@ -21,7 +21,6 @@ import {
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
-import TrainingStartTimePicker from "../components/TrainingStartTimePicker";
 import { takeCreatedTrainerExercise } from "../lib/trainerExerciseSelection";
 import { getTrainerExercisePreviewUrl } from "../lib/trainerExercisePreview";
 
@@ -190,7 +189,6 @@ export default function TrainingNieuwScreen() {
 
     const [title, setTitle] = useState("");
     const [trainingDate, setTrainingDate] = useState<Date | null>(null);
-    const [startTime, setStartTime] = useState("");
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [teams, setTeams] = useState<TeamOption[]>([]);
@@ -456,7 +454,6 @@ export default function TrainingNieuwScreen() {
 
             setTitle(`${training.title} (kopie)`);
             setTrainingDate(null);
-            setStartTime("");
             if (training.team_id) {
                 setSelectedTeamId(String(training.team_id));
             }
@@ -618,8 +615,8 @@ export default function TrainingNieuwScreen() {
             return;
         }
 
-        if (!trainingDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
-            Alert.alert("Datum en tijd ontbreken", "Vul de trainingsdatum en begintijd in voor de herinneringen.");
+        if (!trainingDate) {
+            Alert.alert("Datum ontbreekt", "Kies eerst een trainingsdatum.");
             return;
         }
         try {
@@ -646,7 +643,6 @@ export default function TrainingNieuwScreen() {
                     team_id: Number(selectedTeamId),
                     title: title.trim(),
                     training_date: formatDateForDatabase(trainingDate),
-                    start_time: startTime,
                     is_prepared: !asDraft,
                     warmup_exercise_id: publishedId(first?.exerciseId),
                     warmup_duration: Number(first?.duration || 0),
@@ -790,10 +786,8 @@ export default function TrainingNieuwScreen() {
                     </>
                 )}
 
-                <Text style={styles.label}>Begintijd van de training</Text>
-                <TrainingStartTimePicker value={startTime} onChange={setStartTime} />
                 <Text style={{color:COLORS.mutedText,fontSize:13,marginBottom:16}}>
-                    De herinneringen worden berekend vanaf deze begintijd.
+                    De hoofdtrainer beheert de vaste trainingstijden per team. Herinneringen volgen automatisch dat rooster.
                 </Text>
 
                 <Text style={styles.label}>Bron oefeningen</Text>
