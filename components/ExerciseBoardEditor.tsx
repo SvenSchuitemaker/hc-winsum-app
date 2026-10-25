@@ -82,6 +82,7 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             selectedTool === "passeerRunLine" ||
             selectedTool === "passLine" ||
             selectedTool === "arcPassLine" ||
+            selectedTool === "arcRunLine" ||
             selectedTool === "guideLine" ||
             selectedTool === "coneLine";
         const isRunPassPairTool = selectedTool === "runPassPair";
@@ -449,6 +450,12 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
                     ) : (
                         <>
                             <Text style={styles.helperText}>Geselecteerd: {selectedItem.type}</Text>
+                            {(selectedItem.type === "runLine" || selectedItem.type === "passLine") && selectedItem.lineStyle === "arc" && (
+                                <Pressable style={styles.actionButton} onPress={() => updateItem(selectedItem.id, { arcDirection: selectedItem.arcDirection === -1 ? 1 : -1 })}>
+                                    <Ionicons name="swap-horizontal-outline" size={18} color={COLORS.text} />
+                                    <Text style={styles.helperText}>Spiegel boog</Text>
+                                </Pressable>
+                            )}
 
                             {selectedItem.type === "hat" && (
                                 <>

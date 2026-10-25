@@ -194,6 +194,10 @@ export function createNewItem(
         };
     }
 
+    if (type === "arcRunLine") {
+        return { id: makeId(), type: "runLine", x, y, x2: x, y2: y, lineStyle: "arc", arcDirection: 1 };
+    }
+
     if (type === "arcPassLine") {
         return {
             id: makeId(),
