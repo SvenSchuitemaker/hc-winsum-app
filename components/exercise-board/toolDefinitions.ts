@@ -26,6 +26,7 @@ export const TOOLS: ToolOption[] = [
     { type: "bounceRunLine", label: "Stuiterbal", icon: "radio-button-off-outline" },
     { type: "passeerRunLine", label: "Passeer", icon: "git-network-outline" },
     { type: "passLine", label: "Passlijn", icon: "play-forward-outline" },
+    { type: "arcRunLine", label: "Boog loop", icon: "return-up-forward-outline" },
     { type: "arcPassLine", label: "Boog pass", icon: "return-up-forward-outline" },
     { type: "guideLine", label: "Stippellijn", icon: "remove-outline" },
     { type: "runPassPair", label: "Loop + pass", icon: "git-compare-outline" },
