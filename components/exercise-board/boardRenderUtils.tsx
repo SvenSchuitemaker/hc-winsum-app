@@ -90,7 +90,7 @@ export function getZigzagArrowAngle(x1: number, y1: number, x2: number, y2: numb
     return Math.atan2(y2 - controlY, x2 - controlX);
 }
 
-export function getArcPath(x1: number, y1: number, x2: number, y2: number) {
+export function getArcPath(x1: number, y1: number, x2: number, y2: number, direction: 1 | -1 = 1) {
     const dx = x2 - x1;
     const dy = y2 - y1;
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -100,8 +100,8 @@ export function getArcPath(x1: number, y1: number, x2: number, y2: number) {
     const py = dx / len;
     const amplitude = Math.max(7, len * 0.38);
 
-    const controlX = midX + px * amplitude;
-    const controlY = midY + py * amplitude;
+    const controlX = midX + px * amplitude * direction;
+    const controlY = midY + py * amplitude * direction;
 
     return {
         d: `M ${x1} ${y1} Q ${controlX} ${controlY} ${x2} ${y2}`,
