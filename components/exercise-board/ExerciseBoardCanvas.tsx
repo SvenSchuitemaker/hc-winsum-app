@@ -211,8 +211,8 @@ export default function ExerciseBoardCanvas({
                             );
                         }
 
-                        if (item.type === "passLine" && item.lineStyle === "arc") {
-                            const arc = getArcPath(x1, y1, x2, y2);
+                        if ((item.type === "passLine" || item.type === "runLine") && item.lineStyle === "arc") {
+                            const arc = getArcPath(x1, y1, x2, y2, item.arcDirection ?? 1);
                             const arrowAngle = getArcArrowAngle(arc.controlX, arc.controlY, x2, y2);
                             const arrowPath = getArrowHeadPathFromAngle(x2, y2, arrowAngle);
 
@@ -233,7 +233,7 @@ export default function ExerciseBoardCanvas({
                                         d={arc.d}
                                         stroke={stroke}
                                         strokeWidth={selected ? "1.2" : "0.8"}
-                                        strokeDasharray="3 2"
+                                        strokeDasharray={item.type === "passLine" ? "3 2" : undefined}
                                         fill="none"
                                     />
                                     <Path
