@@ -227,7 +227,8 @@ export default function ExerciseBewerkScreen() {
                 throw new Error("Supabase is niet geladen.");
             }
 
-            const hasBoardItems = boardLayout.items.length > 0;
+            const latestBoardLayout = boardPreviewRef.current?.getLayout() ?? boardLayout;
+            const hasBoardItems = latestBoardLayout.items.length > 0;
             if (tracePhotoUri && !hasBoardItems) {
                 throw new Error("Teken eerst de oefening over de foto voordat je opslaat.");
             }
@@ -245,7 +246,7 @@ export default function ExerciseBewerkScreen() {
                     exerciseId: Number(id),
                     title: title.trim(),
                     boardRef: boardPreviewRef.current,
-                    boardLayout,
+                    boardLayout: latestBoardLayout,
                 });
                 if (!nextImageUrl || nextImageUrl.includes("/imports/")) {
                     throw new Error("De getekende veldafbeelding kon niet worden opgeslagen.");
