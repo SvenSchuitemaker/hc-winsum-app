@@ -152,6 +152,23 @@ export default function ConceptenScreen() {
         exerciseId:Date.now(),title:selected.title,boardRef:editor.current,boardLayout:layout,
       });
       if (!image || image.includes("/imports/")) throw new Error("Geen getekende bordafbeelding ontvangen.");
+
+      // The preview is rendered from the edited layout in React state. Persist
+      // that exact layout before the publication RPC reads the concept row.
+      // Otherwise the public PNG is correct while its editable board remains
+      // the original AI-generated draft.
+      const publishedLayout = {...layout, backgroundImageUrl:null};
+      const {data:savedConcept,error:layoutError}=await supabase.from("exercise_concepts")
+        .update({board_layout:publishedLayout})
+        .eq("id",selected.id).eq("status","ready")
+        .select("id,board_layout").single();
+      if (layoutError || !savedConcept) {
+        throw new Error("De aangepaste tekening kon niet worden opgeslagen. De oefening is niet gepubliceerd.");
+      }
+      if (JSON.stringify(savedConcept.board_layout?.items) !== JSON.stringify(publishedLayout.items)) {
+        throw new Error("De opgeslagen tekening wijkt af van de preview. De oefening is niet gepubliceerd.");
+      }
+
       const {error:publishError}=await supabase.rpc("approve_trainer_exercise", {
         p_concept_id:selected.id, p_image_url:image,
       });
