@@ -71,6 +71,7 @@ export default function ExerciseDetailScreen() {
     const [deleteError, setDeleteError] = useState("");
 
     const isAdmin = role === "super_admin";
+    const canViewAnimation = role === "head_trainer" || role === "super_admin";
     const isDesktop = width >= 900;
 
     useEffect(() => {
@@ -289,7 +290,7 @@ export default function ExerciseDetailScreen() {
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={[styles.pageContent, isDesktop && styles.pageContentDesktop]}>
-                {showAnimation && exercise.board_layout ? (
+                {canViewAnimation && showAnimation && exercise.board_layout ? (
                     <ExerciseAnimation layout={exercise.board_layout} imageUrl={exercise.image_url} exerciseId={exercise.id} onClose={() => setShowAnimation(false)}/>
                 ) : (
                     <View style={[styles.imageWrap, isDesktop && styles.imageWrapDesktop]}>
@@ -301,7 +302,7 @@ export default function ExerciseDetailScreen() {
                     </View>
                 )}
 
-                {!showAnimation && !!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
+                {canViewAnimation && !showAnimation && !!exercise.board_layout?.items?.some(item => item.type === "runLine" || item.type === "passLine") && <>
                     <Pressable style={{backgroundColor:COLORS.primary,padding:13,borderRadius:12,marginBottom:12}}
                         onPress={() => setShowAnimation(value => !value)}>
                         <Text style={{color:"#fff",fontWeight:"900",textAlign:"center"}}>▶ Bekijk oefeninganimatie</Text>
