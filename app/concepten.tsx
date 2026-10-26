@@ -1,6 +1,6 @@
 import { encode } from "base64-arraybuffer";
 import { analyzeExercisePhoto } from "../lib/exercisePhotoImport";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
@@ -31,7 +31,12 @@ export default function ConceptenScreen() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibrationVersion, setCalibrationVersion] = useState(0);
   const [error, setError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
   const editor = useRef<ExerciseBoardEditorRef | null>(null);
+  const handleBoardChange = useCallback((next: ExerciseBoardLayout) => {
+    setSaveMessage("");
+    setLayout(next);
+  }, []);
 
   async function reload() {
     if (!supabase || !user?.id) return;
@@ -47,7 +52,7 @@ export default function ConceptenScreen() {
   useEffect(() => { void reload(); }, [user?.id]);
 
   function open(concept: Concept) {
-    setError(""); setSelected(concept);
+    setError(""); setSaveMessage(""); setSelected(concept);
     // Hydrate the editor with the original photo from the start so its
     // built-in overlay buttons are available immediately above the preview.
     setLayout({...concept.board_layout, backgroundImageUrl: concept.source_image_url, backgroundOpacity: 0.65});
@@ -104,16 +109,25 @@ export default function ConceptenScreen() {
   }
   async function saveCrop() {
     if (!supabase || !selected || !layout) return;
-    setBusy(true);setError("");
+    setBusy(true);setError("");setSaveMessage("");
     try {
-      const {error:saveError} = await supabase.from("exercise_concepts")
-        .update({board_layout:{...layout,backgroundImageUrl:null}})
-        .eq("id",selected.id).eq("status","ready");
-      if (saveError) throw saveError;
-    } catch(e) {setError(e instanceof Error ? e.message : "Uitsnede opslaan mislukt.");}
+      const latest = editor.current?.getLayout() ?? layout;
+      const savedLayout = {...latest, backgroundImageUrl:null};
+      const {data:saved,error:saveError} = await supabase.from("exercise_concepts")
+        .update({board_layout:savedLayout})
+        .eq("id",selected.id).eq("status","ready")
+        .select("id,board_layout").single();
+      if (saveError || !saved) throw saveError ?? new Error("De tekening is niet opgeslagen.");
+      if (saved.board_layout?.items?.length !== latest.items.length) {
+        throw new Error("De opgeslagen tekening is onvolledig.");
+      }
+      setLayout(latest);
+      setSelected(current => current ? {...current, board_layout:savedLayout} : current);
+      setSaveMessage("Tekening opgeslagen. Je kunt deze later opnieuw openen of goedkeuren.");
+    } catch(e) {setError(e instanceof Error ? e.message : "Tekening opslaan mislukt.");}
     finally {setBusy(false);}
   }
-  async function deleteRejected(concept: Concept) {
+    async function deleteRejected(concept: Concept) {
     if (!supabase || !user?.id || busy || concept.status !== "rejected") return;
     setBusy(true);setError("");
     try {
@@ -143,13 +157,14 @@ export default function ConceptenScreen() {
   }
     async function approve() {
     if (!supabase || !selected || !layout || !user?.id || busy || selected.status !== "ready") return;
-    if (!layout.items.length) {setError("Dit concept heeft geen tekenobjecten.");return;}
+    const latest = editor.current?.getLayout() ?? layout;
+    if (!latest.items.length) {setError("Dit concept heeft geen tekenobjecten.");return;}
     setBusy(true);setError("");
     try {
       // Upload the rendered drawing before publication. The database RPC
       // checks reviewer permissions and publishes the exercise atomically.
       const image=await uploadExerciseBoardPreview({
-        exerciseId:Date.now(),title:selected.title,boardRef:editor.current,boardLayout:layout,
+        exerciseId:Date.now(),title:selected.title,boardRef:editor.current,boardLayout:latest,
       });
       if (!image || image.includes("/imports/")) throw new Error("Geen getekende bordafbeelding ontvangen.");
 
@@ -157,7 +172,7 @@ export default function ConceptenScreen() {
       // that exact layout before the publication RPC reads the concept row.
       // Otherwise the public PNG is correct while its editable board remains
       // the original AI-generated draft.
-      const publishedLayout = {...layout, backgroundImageUrl:null};
+      const publishedLayout = {...latest, backgroundImageUrl:null};
       const {data:savedConcept,error:layoutError}=await supabase.from("exercise_concepts")
         .update({board_layout:publishedLayout})
         .eq("id",selected.id).eq("status","ready")
@@ -211,7 +226,7 @@ export default function ConceptenScreen() {
         <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
         {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
           value={layout}
-          onChange={setLayout}/>}
+          onChange={handleBoardChange}/>}
           </View>
           <View style={[styles.detailsColumn, desktop && styles.detailsColumnDesktop]}>
         <Text style={styles.heading}>{selected?.title}</Text>
@@ -265,7 +280,7 @@ export default function ConceptenScreen() {
             </Pressable>
           </View>)}
           <Pressable style={styles.button} disabled={busy} onPress={()=>void saveCrop()}>
-            <Text style={styles.buttonText}>Uitsnede bewaren</Text>
+            <Text style={styles.buttonText}>Tekening en uitsnede opslaan</Text>
           </Pressable>
         </View>}
 
@@ -273,8 +288,10 @@ export default function ConceptenScreen() {
 
 
         {!!error && <Text style={styles.error}>{error}</Text>}
+        {!!saveMessage && <Text style={styles.body}>{saveMessage}</Text>}
         {busy && <ActivityIndicator color={COLORS.primaryLight}/>}
         {selected?.status==="ready" && <>
+          <Pressable style={styles.button} disabled={busy} onPress={()=>void saveCrop()}><Text style={styles.buttonText}>Bewerkte tekening opslaan</Text></Pressable>
           <Pressable style={styles.button} disabled={busy} onPress={()=>void approve()}><Text style={styles.buttonText}>Goedkeuren en openbaar plaatsen</Text></Pressable>
           <Pressable style={styles.button} disabled={busy} onPress={()=>void reject()}><Text style={styles.buttonText}>Afwijzen en verwijderen</Text></Pressable>
         </>}

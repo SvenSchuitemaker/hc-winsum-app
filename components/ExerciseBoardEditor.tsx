@@ -101,6 +101,9 @@ export default forwardRef<ExerciseBoardEditorRef, ExerciseBoardEditorProps>(
             getCaptureTarget() {
                 return captureTargetRef.current;
             },
+            getLayout() {
+                return { fieldMode, fieldOrientation, items, backgroundImageUrl, backgroundOpacity, backgroundCalibration };
+            },
         }));
 
         useEffect(() => {
@@ -868,3 +871,5 @@ const styles = StyleSheet.create({
         fontSize: 15,
     },
 });
+
+export type { ExerciseBoardEditorRef, ExerciseBoardLayout } from "./exercise-board/boardTypes";
