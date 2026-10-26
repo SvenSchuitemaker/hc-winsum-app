@@ -1,6 +1,6 @@
 import { encode } from "base64-arraybuffer";
 import { analyzeExercisePhoto } from "../lib/exercisePhotoImport";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
@@ -33,6 +33,10 @@ export default function ConceptenScreen() {
   const [error, setError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const editor = useRef<ExerciseBoardEditorRef | null>(null);
+  const handleBoardChange = useCallback((next: ExerciseBoardLayout) => {
+    setSaveMessage("");
+    setLayout(next);
+  }, []);
 
   async function reload() {
     if (!supabase || !user?.id) return;
@@ -222,7 +226,7 @@ export default function ConceptenScreen() {
         <Text style={styles.body}>Gebruik direct boven het veld 'Klaar met overtrekken' of 'Toon foto om bij te stellen'. De originele foto is alleen een hulpmiddel en wordt niet gepubliceerd.</Text>
         {layout && <ExerciseBoardEditor key={selected?.id + "-" + calibrationVersion} ref={editor}
           value={layout}
-          onChange={(next) => { setSaveMessage(""); setLayout(next); }}/>}
+          onChange={handleBoardChange}/>}
           </View>
           <View style={[styles.detailsColumn, desktop && styles.detailsColumnDesktop]}>
         <Text style={styles.heading}>{selected?.title}</Text>
