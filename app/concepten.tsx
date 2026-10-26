@@ -165,7 +165,8 @@ export default function ConceptenScreen() {
       if (layoutError || !savedConcept) {
         throw new Error("De aangepaste tekening kon niet worden opgeslagen. De oefening is niet gepubliceerd.");
       }
-      if (JSON.stringify(savedConcept.board_layout?.items) !== JSON.stringify(publishedLayout.items)) {
+      if (savedConcept.board_layout?.items?.length !== publishedLayout.items.length ||
+          publishedLayout.items.some((item,index) => savedConcept.board_layout.items[index]?.id !== item.id)) {
         throw new Error("De opgeslagen tekening wijkt af van de preview. De oefening is niet gepubliceerd.");
       }
 
