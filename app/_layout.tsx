@@ -62,6 +62,7 @@ export default function RootLayout() {
                         <Stack.Screen name="exercise/[id]" options={withBack("Oefening")} />
                         <Stack.Screen name="training-nieuw" options={withBack("Nieuwe training")} />
                         <Stack.Screen name="training/[id]" options={withBack("Training")} />
+                        <Stack.Screen name="training-live/[id]" options={withBack("Live training")} />
                         <Stack.Screen name="training-bewerk/[id]" options={withBack("Training bewerken")} />
                         <Stack.Screen name="exercise-bewerk/[id]" options={withBack("Oefening bewerken")} />
                         <Stack.Screen name="dashboard" options={withBack("Dashboard")} />
