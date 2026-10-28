@@ -56,9 +56,15 @@ export default function LiveTrainingScreen() {
             const message=await enableTrainingPushNotifications(user.id);
             const enabled=await hasLiveTimerPushSubscription();
             setPushEnabled(enabled);setPushMessage(message);
+            if(enabled&&endTime.current!==null&&endTime.current>Date.now()&&id){
+                const revision=++alarmRevision.current;
+                const newId=await scheduleLiveTimerPush(user.id,Number(id),endTime.current);
+                if(revision!==alarmRevision.current)await cancelLiveTimerPush(newId);
+                else alarmRowId.current=newId;
+            }
         }catch(error){setPushMessage(error instanceof Error?error.message:"Meldingen activeren mislukt.");}
         finally{setPushBusy(false);}
-    },[user]);
+    },[user,id]);
     const [trainingTitle,setTrainingTitle]=useState("");
     const [blocks,setBlocks]=useState<SessionBlock[]>([]);
     const [step,setStep]=useState(0);
