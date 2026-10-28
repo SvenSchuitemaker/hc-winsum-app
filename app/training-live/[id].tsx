@@ -6,6 +6,9 @@ import ExerciseAnimation from "../../components/ExerciseAnimation";
 import type { ExerciseBoardLayout } from "../../components/exercise-board/boardTypes";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { getTrainerExercisePreviewUrl } from "../../lib/trainerExercisePreview";
+import { useAuth } from "../../context/AuthContext";
+import { canUseWebPush, enableTrainingPushNotifications } from "../../lib/pushNotifications";
+import { cancelLiveTimerPush, hasLiveTimerPushSubscription, scheduleLiveTimerPush } from "../../lib/liveTimerPush";
 import { supabase } from "../../lib/supabase";
 
 type ExerciseInfo = { title:string;image_url:string|null;board_layout?:ExerciseBoardLayout|null;preview_image_path?:string|null };
@@ -15,6 +18,47 @@ function clock(total:number) {const sec=Math.max(0,total);return `${String(Math.
 
 export default function LiveTrainingScreen() {
     const {id}=useLocalSearchParams<{id:string}>();
+    const {user}=useAuth();
+    const [pushEnabled,setPushEnabled]=useState(false);
+    const [pushBusy,setPushBusy]=useState(false);
+    const [pushMessage,setPushMessage]=useState("");
+    const alarmRowId=useRef<string|null>(null);
+    const alarmRevision=useRef(0);
+    useEffect(()=>{
+        let active=true;
+        if(canUseWebPush())void hasLiveTimerPushSubscription()
+            .then(value=>{if(active)setPushEnabled(value);})
+            .catch(()=>{});
+        return()=>{active=false;};
+    },[]);
+    const cancelPendingPush=useCallback(()=>{
+        alarmRevision.current++;
+        const oldId=alarmRowId.current;
+        alarmRowId.current=null;
+        if(oldId)void cancelLiveTimerPush(oldId).catch(()=>setPushMessage("Een eerdere melding kon niet worden ingetrokken."));
+    },[]);
+    const schedulePush=useCallback((dueAt:number)=>{
+        const revision=++alarmRevision.current;
+        const oldId=alarmRowId.current;
+        alarmRowId.current=null;
+        void (async()=>{
+            if(oldId)await cancelLiveTimerPush(oldId);
+            if(!pushEnabled||!user||!id||dueAt<=Date.now())return;
+            const newId=await scheduleLiveTimerPush(user.id,Number(id),dueAt);
+            if(revision!==alarmRevision.current)await cancelLiveTimerPush(newId);
+            else alarmRowId.current=newId;
+        })().catch(()=>setPushMessage("Achtergrondmelding inplannen mislukt; de gewone timer blijft werken."));
+    },[pushEnabled,user,id]);
+    const enablePush=useCallback(async()=>{
+        if(!user)return;
+        setPushBusy(true);setPushMessage("");
+        try{
+            const message=await enableTrainingPushNotifications(user.id);
+            const enabled=await hasLiveTimerPushSubscription();
+            setPushEnabled(enabled);setPushMessage(message);
+        }catch(error){setPushMessage(error instanceof Error?error.message:"Meldingen activeren mislukt.");}
+        finally{setPushBusy(false);}
+    },[user]);
     const [trainingTitle,setTrainingTitle]=useState("");
     const [blocks,setBlocks]=useState<SessionBlock[]>([]);
     const [step,setStep]=useState(0);
@@ -40,14 +84,16 @@ export default function LiveTrainingScreen() {
     const addMinute=useCallback(()=>{
         if(endTime.current!==null){
             endTime.current+=60000;
+            schedulePush(endTime.current);
             refreshTime();
         }else setSeconds(value=>value+60);
-    },[refreshTime]);
+    },[refreshTime,schedulePush]);
     const resetTimer=useCallback((duration:number)=>{
+        cancelPendingPush();
         endTime.current=null;
         setRunning(false);
         setSeconds(Math.max(0,Math.round(duration*60)));
-    },[]);
+    },[cancelPendingPush]);
     const unlockAudio=useCallback(()=>{
         if(Platform.OS!=="web"||typeof window==="undefined")return;
         try {
@@ -60,6 +106,7 @@ export default function LiveTrainingScreen() {
     const toggleTimer=useCallback(()=>{
         unlockAudio();
         if(endTime.current!==null){
+            cancelPendingPush();
             const remaining=Math.max(0,Math.ceil((endTime.current-Date.now())/1000));
             endTime.current=null;
             setSeconds(remaining);
@@ -67,10 +114,11 @@ export default function LiveTrainingScreen() {
             if(remaining===0)setAlarmActive(true);
         }else{
             endTime.current=Date.now()+seconds*1000;
+            schedulePush(endTime.current);
             setRunning(true);
             refreshTime();
         }
-    },[seconds,unlockAudio,refreshTime]);
+    },[seconds,unlockAudio,refreshTime,cancelPendingPush,schedulePush]);
     const beep=useCallback(()=>{
         const context=audioContext.current;
         if(!context||context.state!=="running")return;
@@ -117,10 +165,11 @@ export default function LiveTrainingScreen() {
         finally{if(active)setLoading(false);}
     }void load();return()=>{active=false;};},[id]);
     const select=useCallback((next:number)=>{
+        cancelPendingPush();
         if(next<0||next>=blocks.length){endTime.current=null;setRunning(false);return;}
         endTime.current=null;
         setAlarmActive(false);setStep(next);setSeconds(Math.max(0,Math.round(blocks[next].duration*60)));setRunning(false);
-    },[blocks]);
+    },[blocks,cancelPendingPush]);
     useEffect(()=>{
         if(!running)return;
         refreshTime();
@@ -142,9 +191,10 @@ export default function LiveTrainingScreen() {
         };
     },[refreshTime]);
     const dismissAlarm=useCallback(()=>{
+        cancelPendingPush();
         setAlarmActive(false);
         if(step+1<blocks.length)select(step+1);
-    },[step,blocks.length,select]);
+    },[step,blocks.length,select,cancelPendingPush]);
     const current=blocks[step];
     const total=useMemo(()=>blocks.reduce((sum,row)=>sum+row.duration,0),[blocks]);
     if(loading)return <View style={styles.center}><ActivityIndicator color={COLORS.primaryLight}/></View>;
@@ -154,6 +204,12 @@ export default function LiveTrainingScreen() {
         <Text style={styles.subtitle}>{trainingTitle} · {total} minuten</Text>
         <Text style={styles.progress}>Onderdeel {step+1} van {blocks.length}{current.is_break?" · PAUZE":""}</Text>
         <Text style={styles.title}>{current.title}</Text>
+        {canUseWebPush()&&!pushEnabled&&<Pressable accessibilityRole="button" style={styles.pushButton}
+          onPress={()=>void enablePush()} disabled={pushBusy}>
+            <Text style={styles.buttonText}>{pushBusy?"Meldingen instellen…":"🔔 Alarm op vergrendelscherm inschakelen"}</Text>
+        </Pressable>}
+        {pushEnabled&&<Text style={styles.pushStatus}>✓ Achtergrondmeldingen ingeschakeld</Text>}
+        {!!pushMessage&&<Text style={styles.pushHint}>{pushMessage}</Text>}
         <View style={[styles.clockBox,current.is_break&&styles.breakBox]}>
             <Text style={styles.clock}>{clock(seconds)}</Text>
             <Text style={styles.subtitle}>{current.is_break?"Zet de volgende oefening klaar":"Resterende tijd"}</Text>
@@ -208,5 +264,8 @@ const styles=StyleSheet.create({
     alarmCard:{backgroundColor:COLORS.surface,borderRadius:RADIUS.lg,padding:28,width:"100%",maxWidth:440,alignItems:"center",gap:18,borderWidth:2,borderColor:"#FFCF65"},
     alarmTitle:{fontSize:30,fontWeight:"900",color:"#fff",textAlign:"center"},
     alarmDescription:{fontSize:17,lineHeight:25,color:COLORS.text,textAlign:"center"},
-    alarmButton:{backgroundColor:COLORS.primary,paddingVertical:17,paddingHorizontal:25,borderRadius:12,flexDirection:"row",alignItems:"center",gap:12,marginTop:8}
+    alarmButton:{backgroundColor:COLORS.primary,paddingVertical:17,paddingHorizontal:25,borderRadius:12,flexDirection:"row",alignItems:"center",gap:12,marginTop:8},
+    pushButton:{backgroundColor:COLORS.surfaceLight,padding:14,borderRadius:12,alignItems:"center"},
+    pushStatus:{color:COLORS.primaryLight,fontWeight:"700"},
+    pushHint:{color:COLORS.mutedText,fontSize:13,lineHeight:19}
 });
