@@ -215,6 +215,7 @@ export default function LiveTrainingScreen() {
             <Text style={styles.buttonText}>{pushBusy?"Meldingen instellen…":"🔔 Alarm op vergrendelscherm inschakelen"}</Text>
         </Pressable>}
         {pushEnabled&&<Text style={styles.pushStatus}>✓ Achtergrondmeldingen ingeschakeld</Text>}
+        {Platform.OS==="web"&&!canUseWebPush()&&<Text style={styles.pushHint}>Achtergrondmeldingen zijn hier niet beschikbaar. Op iPhone: voeg H.C. Winsum eerst toe aan je beginscherm en open de app vanaf daar.</Text>}
         {!!pushMessage&&<Text style={styles.pushHint}>{pushMessage}</Text>}
         <View style={[styles.clockBox,current.is_break&&styles.breakBox]}>
             <Text style={styles.clock}>{clock(seconds)}</Text>
