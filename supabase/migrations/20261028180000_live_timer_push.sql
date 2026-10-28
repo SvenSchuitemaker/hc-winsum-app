@@ -17,13 +17,16 @@ create index if not exists live_training_timer_alarms_due_idx
 create index if not exists live_training_timer_alarms_user_idx
   on public.live_training_timer_alarms(user_id);
 alter table public.live_training_timer_alarms enable row level security;
+drop policy if exists "Trainers view own timer alarms" on public.live_training_timer_alarms;
 create policy "Trainers view own timer alarms"
   on public.live_training_timer_alarms for select to authenticated
   using (user_id = (select auth.uid()));
+drop policy if exists "Trainers schedule own timer alarms" on public.live_training_timer_alarms;
 create policy "Trainers schedule own timer alarms"
   on public.live_training_timer_alarms for insert to authenticated
   with check (user_id = (select auth.uid()) and due_at > now()
     and due_at < now() + interval '24 hours' and fired_at is null);
+drop policy if exists "Trainers cancel own timer alarms" on public.live_training_timer_alarms;
 create policy "Trainers cancel own timer alarms"
   on public.live_training_timer_alarms for delete to authenticated
   using (user_id = (select auth.uid()));
