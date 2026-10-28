@@ -8,6 +8,7 @@ self.addEventListener("push", event => {
     badge: "./favicon.png",
     data: { path: data.path || "/notifications" },
     tag: data.title || "hockeyapp",
+    ...(data.title === "⏰ Tijd is om!" ? { requireInteraction: true, vibrate: [400, 180, 400, 180, 400] } : {}),
   }));
 });
 self.addEventListener("notificationclick", event => {
