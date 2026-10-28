@@ -37,20 +37,6 @@ export default function LiveTrainingScreen() {
             setAlarmActive(true);
         }
     },[]);
-    const toggleTimer=useCallback(()=>{
-        unlockAudio();
-        if(endTime.current!==null){
-            const remaining=Math.max(0,Math.ceil((endTime.current-Date.now())/1000));
-            endTime.current=null;
-            setSeconds(remaining);
-            setRunning(false);
-            if(remaining===0)setAlarmActive(true);
-        }else{
-            endTime.current=Date.now()+seconds*1000;
-            setRunning(true);
-            refreshTime();
-        }
-    },[seconds,unlockAudio,refreshTime]);
     const addMinute=useCallback(()=>{
         if(endTime.current!==null){
             endTime.current+=60000;
@@ -71,6 +57,20 @@ export default function LiveTrainingScreen() {
             void audioContext.current.resume();
         }catch{/* Browser may block sound. */}
     },[]);
+    const toggleTimer=useCallback(()=>{
+        unlockAudio();
+        if(endTime.current!==null){
+            const remaining=Math.max(0,Math.ceil((endTime.current-Date.now())/1000));
+            endTime.current=null;
+            setSeconds(remaining);
+            setRunning(false);
+            if(remaining===0)setAlarmActive(true);
+        }else{
+            endTime.current=Date.now()+seconds*1000;
+            setRunning(true);
+            refreshTime();
+        }
+    },[seconds,unlockAudio,refreshTime]);
     const beep=useCallback(()=>{
         const context=audioContext.current;
         if(!context||context.state!=="running")return;
