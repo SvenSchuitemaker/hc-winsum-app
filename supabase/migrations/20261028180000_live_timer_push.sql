@@ -1,3 +1,8 @@
+-- Extend the existing notifications inbox to accept timer alarms.
+alter table public.app_notifications drop constraint if exists app_notifications_kind_check;
+alter table public.app_notifications add constraint app_notifications_kind_check
+  check (kind in ('reminder_24h','reminder_1h','evaluation','concept','live_timer'));
+
 -- One pending alarm per running live-training interval, owned by its trainer.
 create table if not exists public.live_training_timer_alarms (
   id uuid primary key default gen_random_uuid(),
@@ -23,6 +28,7 @@ create policy "Trainers cancel own timer alarms"
   on public.live_training_timer_alarms for delete to authenticated
   using (user_id = (select auth.uid()));
 grant select, insert, delete on public.live_training_timer_alarms to authenticated;
+revoke all on public.live_training_timer_alarms from anon;
 
 -- Cron is the only invoker; clients cannot enqueue push notifications themselves.
 create or replace function public.enqueue_live_timer_alarms()
