@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, Vibration, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, Vibration, View } from "react-native";
 import ExerciseAnimation from "../../components/ExerciseAnimation";
 import type { ExerciseBoardLayout } from "../../components/exercise-board/boardTypes";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
@@ -25,6 +25,29 @@ export default function LiveTrainingScreen() {
     const [alarmActive,setAlarmActive]=useState(false);
     const audioContext=useRef<any>(null);
     const alarmInterval=useRef<ReturnType<typeof setInterval>|null>(null);
+    // A fixed end timestamp keeps elapsed time accurate while the app/browser is suspended.
+    const endTime=useRef<number|null>(null);
+    const refreshTime=useCallback(()=>{
+        if(endTime.current===null)return;
+        const remaining=Math.max(0,Math.ceil((endTime.current-Date.now())/1000));
+        setSeconds(remaining);
+        if(remaining===0){
+            endTime.current=null;
+            setRunning(false);
+            setAlarmActive(true);
+        }
+    },[]);
+    const addMinute=useCallback(()=>{
+        if(endTime.current!==null){
+            endTime.current+=60000;
+            refreshTime();
+        }else setSeconds(value=>value+60);
+    },[refreshTime]);
+    const resetTimer=useCallback((duration:number)=>{
+        endTime.current=null;
+        setRunning(false);
+        setSeconds(Math.max(0,Math.round(duration*60)));
+    },[]);
     const unlockAudio=useCallback(()=>{
         if(Platform.OS!=="web"||typeof window==="undefined")return;
         try {
@@ -34,6 +57,20 @@ export default function LiveTrainingScreen() {
             void audioContext.current.resume();
         }catch{/* Browser may block sound. */}
     },[]);
+    const toggleTimer=useCallback(()=>{
+        unlockAudio();
+        if(endTime.current!==null){
+            const remaining=Math.max(0,Math.ceil((endTime.current-Date.now())/1000));
+            endTime.current=null;
+            setSeconds(remaining);
+            setRunning(false);
+            if(remaining===0)setAlarmActive(true);
+        }else{
+            endTime.current=Date.now()+seconds*1000;
+            setRunning(true);
+            refreshTime();
+        }
+    },[seconds,unlockAudio,refreshTime]);
     const beep=useCallback(()=>{
         const context=audioContext.current;
         if(!context||context.state!=="running")return;
@@ -80,11 +117,30 @@ export default function LiveTrainingScreen() {
         finally{if(active)setLoading(false);}
     }void load();return()=>{active=false;};},[id]);
     const select=useCallback((next:number)=>{
-        if(next<0||next>=blocks.length){setRunning(false);return;}
+        if(next<0||next>=blocks.length){endTime.current=null;setRunning(false);return;}
+        endTime.current=null;
         setAlarmActive(false);setStep(next);setSeconds(Math.max(0,Math.round(blocks[next].duration*60)));setRunning(false);
     },[blocks]);
-    useEffect(()=>{if(!running)return;const interval=setInterval(()=>setSeconds(value=>Math.max(0,value-1)),1000);return()=>clearInterval(interval);},[running]);
-    useEffect(()=>{if(seconds===0&&running){setRunning(false);setAlarmActive(true);}},[seconds,running]);
+    useEffect(()=>{
+        if(!running)return;
+        refreshTime();
+        const interval=setInterval(refreshTime,500);
+        return()=>clearInterval(interval);
+    },[running,refreshTime]);
+    useEffect(()=>{
+        const subscription=AppState.addEventListener("change",state=>{
+            if(state==="active")refreshTime();
+        });
+        if(Platform.OS!=="web")return()=>subscription.remove();
+        const onVisible=()=>{if(document.visibilityState==="visible")refreshTime();};
+        document.addEventListener("visibilitychange",onVisible);
+        window.addEventListener("focus",refreshTime);
+        return()=>{
+            subscription.remove();
+            document.removeEventListener("visibilitychange",onVisible);
+            window.removeEventListener("focus",refreshTime);
+        };
+    },[refreshTime]);
     const dismissAlarm=useCallback(()=>{
         setAlarmActive(false);
         if(step+1<blocks.length)select(step+1);
@@ -102,9 +158,9 @@ export default function LiveTrainingScreen() {
             <Text style={styles.clock}>{clock(seconds)}</Text>
             <Text style={styles.subtitle}>{current.is_break?"Zet de volgende oefening klaar":"Resterende tijd"}</Text>
             <View style={styles.actions}>
-                <Pressable style={styles.button} onPress={()=>{unlockAudio();setRunning(value=>!value);}}><Text style={styles.buttonText}>{running?"⏸ Pauzeer timer":"▶ Start timer"}</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={()=>setSeconds(value=>value+60)}><Text style={styles.buttonText}>+ 1 minuut</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={()=>setSeconds(Math.max(0,Math.round(current.duration*60)))}><Text style={styles.buttonText}>↺ Reset</Text></Pressable>
+                <Pressable style={styles.button} onPress={toggleTimer}><Text style={styles.buttonText}>{running?"⏸ Pauzeer timer":"▶ Start timer"}</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={addMinute}><Text style={styles.buttonText}>+ 1 minuut</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={()=>resetTimer(current.duration)}><Text style={styles.buttonText}>↺ Reset</Text></Pressable>
             </View>
         </View>
         {!!current.notes&&<Text style={styles.notes}>{current.notes}</Text>}
