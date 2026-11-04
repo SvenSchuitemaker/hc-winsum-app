@@ -9,6 +9,7 @@ import {
     useWindowDimensions,
     View,
 } from "react-native";
+import EvaluationNotifications from "../../components/EvaluationNotifications";
 import ExerciseCard from "../../components/ExerciseCard";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
@@ -80,6 +81,7 @@ export default function HomeScreen() {
                 isCompact && styles.contentCompact,
             ]}
         >
+            <EvaluationNotifications />
             <View style={styles.pageContent}>
                 <View style={[styles.hero, isCompact && styles.heroCompact]}>
                     <Image

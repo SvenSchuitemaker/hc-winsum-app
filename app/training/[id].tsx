@@ -96,6 +96,7 @@ export default function TrainingDetailScreen() {
     const [savingTemplate, setSavingTemplate] = useState(false);
     const [savingNote, setSavingNote] = useState(false);
 
+    const [noteMessage, setNoteMessage] = useState("");
     const [errorText, setErrorText] = useState("");
     const [whatWentWell, setWhatWentWell] = useState("");
     const [whatToImprove, setWhatToImprove] = useState("");
@@ -359,6 +360,8 @@ export default function TrainingDetailScreen() {
 
     async function handleSaveNote() {
         try {
+            if (savingNote) return;
+            setNoteMessage("");
             setSavingNote(true);
 
             if (!supabase || !training) {
@@ -379,18 +382,21 @@ export default function TrainingDetailScreen() {
                 attendance_note: attendanceNote.trim() || null,
             };
 
+            if (![payload.what_went_well, payload.what_to_improve, payload.next_time_notes, payload.attendance_note].some(Boolean)) {
+                throw new Error("Vul minimaal één evaluatieveld in voordat je opslaat.");
+            }
+
             const { error } = await supabase
                 .from("training_notes")
                 .upsert(payload, { onConflict: "training_id" });
 
             if (error) throw error;
 
-            Alert.alert("Gelukt", "Evaluatie opgeslagen.");
+            setNote(payload);
+            setNoteMessage("Evaluatie opgeslagen en verstuurd naar de hoofdtrainer.");
         } catch (error) {
-            Alert.alert(
-                "Fout",
-                error instanceof Error ? error.message : "Evaluatie opslaan mislukt."
-            );
+            setNoteMessage(error && typeof error === "object" && "message" in error
+                ? String(error.message) : "Evaluatie opslaan mislukt. Probeer opnieuw.");
         } finally {
             setSavingNote(false);
         }
@@ -552,6 +558,7 @@ export default function TrainingDetailScreen() {
             </View>
             <View style={styles.card}>
                 <Text style={styles.notesTitle}>Evaluatie na training</Text>
+                <Text style={styles.blockNotes}>Bij opslaan wordt je evaluatie verstuurd naar de hoofdtrainer.</Text>
 
                 <Text style={styles.label}>Wat ging goed?</Text>
                 <TextInput
@@ -601,9 +608,10 @@ export default function TrainingDetailScreen() {
                     {savingNote ? (
                         <ActivityIndicator color={COLORS.text} />
                     ) : (
-                        <Text style={styles.saveNoteButtonText}>Evaluatie opslaan</Text>
+                        <Text style={styles.saveNoteButtonText}>Evaluatie opslaan en versturen</Text>
                     )}
                 </Pressable>
+                {!!noteMessage && <Text accessibilityLiveRegion="polite" style={styles.blockNotes}>{noteMessage}</Text>}
             </View>
         </ScrollView>
     );
