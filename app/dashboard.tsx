@@ -1,3 +1,4 @@
+import EvaluationNotifications from "../components/EvaluationNotifications";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -509,6 +510,7 @@ export default function DashboardScreen() {
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.page}>
+                <EvaluationNotifications />
                 <View style={styles.hero}>
                     <View style={styles.heroTop}>
                         <View style={styles.heroIcon}>
