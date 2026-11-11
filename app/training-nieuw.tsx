@@ -9,7 +9,6 @@ import {
     ActivityIndicator,
     Alert,
     ImageBackground,
-    Modal,
     Platform,
     Pressable,
     ScrollView,
@@ -18,6 +17,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+import ExercisePicker, { type ExerciseCategory, type ExerciseChoice } from "../components/ExercisePicker";
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
@@ -25,18 +25,7 @@ import { planPhaseOn, type TeamTrainingPlan } from "../lib/teamTrainingPlans";
 import { takeCreatedTrainerExercise } from "../lib/trainerExerciseSelection";
 import { getTrainerExercisePreviewUrl } from "../lib/trainerExercisePreview";
 
-type ExerciseOption = {
-    id: number | string;
-    isConcept?: boolean;
-    title: string;
-    category_slug: string;
-    image_url: string | null;
-};
-
-type CategoryOption = {
-    slug: string;
-    title: string;
-};
+type ExerciseOption = ExerciseChoice;
 
 type TeamOption = {
     id: number;
@@ -198,14 +187,13 @@ export default function TrainingNieuwScreen() {
     const [templates, setTemplates] = useState<TemplateOption[]>([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
-    const [categories, setCategories] = useState<CategoryOption[]>([]);
+    const [categories, setCategories] = useState<ExerciseCategory[]>([]);
     const [allExercises, setAllExercises] = useState<ExerciseOption[]>([]);
     const [favoriteExercises, setFavoriteExercises] = useState<ExerciseOption[]>([]);
     const [ownExercises, setOwnExercises] = useState<ExerciseOption[]>([]);
     const [exerciseAddedMessage, setExerciseAddedMessage] = useState(false);
     const [exerciseSource, setExerciseSource] = useState<"all" | "favorites" | "own">("all");
     const [exerciseSelectorBlockId, setExerciseSelectorBlockId] = useState<string | null>(null);
-    const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState<string>("all");
 
     const [blocks, setBlocks] = useState<BlockDraft[]>([]);
     const [loadingData, setLoadingData] = useState(true);
@@ -267,11 +255,6 @@ export default function TrainingNieuwScreen() {
         return exerciseSource === "favorites" ? favoriteExercises : exerciseSource === "own" ? ownExercises : allExercises;
     }, [exerciseSource, favoriteExercises, ownExercises, allExercises]);
 
-    const selectorExercises = useMemo(() => {
-        if (exerciseCategoryFilter === "all") return exercises;
-        return exercises.filter((exercise) => exercise.category_slug === exerciseCategoryFilter);
-    }, [exerciseCategoryFilter, exercises]);
-
     useFocusEffect(useCallback(() => {
         let active = true;
         async function refreshOwn() {
@@ -303,7 +286,6 @@ export default function TrainingNieuwScreen() {
                     ? { ...block, exerciseId: `concept:${created.conceptId}` } : block));
                 setExerciseAddedMessage(true);
                 setExerciseSource("own");
-                setExerciseCategoryFilter("all");
             }
         }
         void refreshOwn();
@@ -349,7 +331,7 @@ export default function TrainingNieuwScreen() {
             if (templateError) throw templateError;
 
             const loadedTeams = (teamsData as TeamOption[]) || [];
-            const loadedCategories = (categoryData as CategoryOption[]) || [];
+            const loadedCategories = (categoryData as ExerciseCategory[]) || [];
             const loadedExercises = (exerciseData as ExerciseOption[]) || [];
             const loadedTemplates = (templateData as TemplateOption[]) || [];
 
@@ -582,7 +564,6 @@ export default function TrainingNieuwScreen() {
 
     function openExerciseSelector(localId: string) {
         setExerciseSelectorBlockId(localId);
-        setExerciseCategoryFilter("all");
     }
 
     function selectExercise(exercise: ExerciseOption) {
@@ -590,7 +571,6 @@ export default function TrainingNieuwScreen() {
 
         updateBlock(exerciseSelectorBlockId, "exerciseId", String(exercise.id));
         setExerciseSelectorBlockId(null);
-        setExerciseCategoryFilter("all");
     }
 
     function getSelectedExercise(exerciseId: string) {
@@ -1031,141 +1011,15 @@ export default function TrainingNieuwScreen() {
                     </View>
                 ))}
 
-                <Modal
-                    visible={!!exerciseSelectorBlockId}
-                    transparent
-                    animationType="fade"
-                    onRequestClose={() => setExerciseSelectorBlockId(null)}
-                >
-                    <View style={styles.modalBackdrop}>
-                        <View style={styles.exerciseModal}>
-                            <View style={styles.modalHeader}>
-                                <View style={styles.modalHeaderText}>
-                                    <Text style={styles.modalTitle}>Kies een oefening</Text>
-                                    <Text style={styles.modalSubtitle}>
-                                        {selectedExerciseBlock?.title || "Trainingsonderdeel"}
-                                    </Text>
-                                </View>
-
-                                <Pressable
-                                    style={styles.modalCloseButton}
-                                    onPress={() => setExerciseSelectorBlockId(null)}
-                                >
-                                    <Ionicons name="close-outline" size={26} color={COLORS.text} />
-                                </Pressable>
-                            </View>
-
-                            <ScrollView
-                                horizontal
-                                style={styles.categoryTabsScroll}
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.categoryTabs}
-                            >
-                                <Pressable
-                                    style={[
-                                        styles.categoryTab,
-                                        exerciseCategoryFilter === "all" && styles.categoryTabSelected,
-                                    ]}
-                                    onPress={() => setExerciseCategoryFilter("all")}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.categoryTabText,
-                                            exerciseCategoryFilter === "all" && styles.categoryTabTextSelected,
-                                        ]}
-                                    >
-                                        Alle
-                                    </Text>
-                                </Pressable>
-
-                                {categories.map((category) => {
-                                    const selected = exerciseCategoryFilter === category.slug;
-
-                                    return (
-                                        <Pressable
-                                            key={category.slug}
-                                            style={[
-                                                styles.categoryTab,
-                                                selected && styles.categoryTabSelected,
-                                            ]}
-                                            onPress={() => setExerciseCategoryFilter(category.slug)}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.categoryTabText,
-                                                    selected && styles.categoryTabTextSelected,
-                                                ]}
-                                                numberOfLines={1}
-                                            >
-                                                {category.title}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </ScrollView>
-
-                            <ScrollView
-                                style={styles.exerciseModalScroll}
-                                contentContainerStyle={styles.exerciseGrid}
-                            >
-                                <Pressable style={styles.exerciseChoiceCard} accessibilityLabel="Maak oefening" onPress={() => {
-                                    const blockId = exerciseSelectorBlockId;
-                                    setExerciseSelectorBlockId(null);
-                                    router.push({ pathname: "/eigen-oefening", params: { blockId: blockId || "" } } as never);
-                                }}>
-                                    <View style={[styles.exerciseChoiceImage, { alignItems:"center", justifyContent:"center", backgroundColor:COLORS.surfaceLight, borderWidth:1, borderStyle:"dashed", borderColor:COLORS.primaryLight }]}>
-                                        <Ionicons name="add-circle-outline" size={46} color={COLORS.primaryLight} />
-                                    </View>
-                                    <Text style={styles.exerciseChoiceTitle}>Maak oefening</Text>
-                                </Pressable>
-                                {selectorExercises.length === 0 ? (
-                                    <Text style={styles.modalEmptyText}>
-                                        Geen oefeningen gevonden in deze categorie.
-                                    </Text>
-                                ) : (
-                                    selectorExercises.map((exercise) => {
-                                        const selected = selectedExerciseBlock?.exerciseId === String(exercise.id);
-
-                                        return (
-                                            <Pressable
-                                                key={exercise.id}
-                                                style={[
-                                                    styles.exerciseChoiceCard,
-                                                    selected && styles.exerciseChoiceCardSelected,
-                                                ]}
-                                                onPress={() => selectExercise(exercise)}
-                                            >
-                                                {exercise.isConcept && !exercise.image_url ? (
-                                                    <View style={[styles.exerciseChoiceImage, { backgroundColor: COLORS.surfaceLight, justifyContent:"center", alignItems:"center" }]}>
-                                                        <Ionicons name="create-outline" size={32} color={COLORS.primaryLight}/>
-                                                        {selected && <Ionicons name="checkmark-circle" size={19} color={COLORS.primaryLight}/>}
-                                                    </View>
-                                                ) : (<ImageBackground
-                                                    source={{
-                                                        uri:
-                                                            exercise.image_url ||
-                                                            "https://picsum.photos/600/400?random=99",
-                                                    }}
-                                                    style={styles.exerciseChoiceImage}
-                                                    imageStyle={styles.exerciseChoiceImageInner}
-                                                >
-                                                    {selected && (
-                                                        <View style={styles.selectedExerciseBadge}>
-                                                            <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-                                                        </View>
-                                                    )}
-                                                </ImageBackground>)}
-                                                <Text style={styles.exerciseChoiceTitle} numberOfLines={2}>
-                                                    {exercise.title}
-                                                </Text>
-                                            </Pressable>
-                                        );
-                                    })
-                                )}
-                            </ScrollView>
-                        </View>
-                    </View>
-                </Modal>
+                {exerciseSelectorBlockId && (
+                    <ExercisePicker subtitle={selectedExerciseBlock?.title || "Trainingsonderdeel"}
+                        exercises={exercises} categories={categories} selectedId={selectedExerciseBlock?.exerciseId}
+                        onSelect={selectExercise} onClose={() => setExerciseSelectorBlockId(null)}
+                        onCreate={() => {
+                            setExerciseSelectorBlockId(null);
+                            router.push({ pathname: "/eigen-oefening", params: { blockId: exerciseSelectorBlockId } } as never);
+                        }} />
+                )}
 
                 {exerciseAddedMessage && <Text style={{ color: COLORS.primaryLight, fontWeight: "800", marginBottom: 12 }}>Je eigen oefening is toegevoegd aan dit onderdeel. Vergeet niet om ook de training hieronder op te slaan.</Text>}
                 <Pressable style={styles.button} onPress={() => handleSave(false)} disabled={saving}>
@@ -1367,151 +1221,6 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: "800",
         lineHeight: 20,
-    },
-    modalBackdrop: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.72)",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 14,
-    },
-    exerciseModal: {
-        width: "100%",
-        maxWidth: 980,
-        height: "92%",
-        backgroundColor: COLORS.background,
-        borderRadius: RADIUS.xl,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        overflow: "hidden",
-    },
-    modalHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: SPACING.md,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-        gap: 12,
-    },
-    modalHeaderText: {
-        flex: 1,
-    },
-    modalTitle: {
-        color: COLORS.text,
-        fontSize: 21,
-        fontWeight: "900",
-        marginBottom: 2,
-    },
-    modalSubtitle: {
-        color: COLORS.mutedText,
-        fontSize: 14,
-    },
-    modalCloseButton: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        backgroundColor: COLORS.surface,
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: COLORS.border,
-    },
-    categoryTabsScroll: {
-        flexGrow: 0,
-        flexShrink: 0,
-        maxHeight: 64,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-    },
-    categoryTabs: {
-        paddingHorizontal: SPACING.md,
-        paddingVertical: 10,
-        gap: 8,
-        alignItems: "center",
-        flexGrow: 0,
-    },
-    categoryTab: {
-        height: 42,
-        flexGrow: 0,
-        flexShrink: 0,
-        alignSelf: "center",
-        justifyContent: "center",
-        paddingHorizontal: 15,
-        borderRadius: RADIUS.pill,
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-    },
-    categoryTabSelected: {
-        backgroundColor: COLORS.primary,
-        borderColor: COLORS.primary,
-    },
-    categoryTabText: {
-        color: COLORS.text,
-        fontSize: 13,
-        fontWeight: "700",
-    },
-    categoryTabTextSelected: {
-        color: "#FFFFFF",
-    },
-    exerciseModalScroll: {
-        flex: 1,
-    },
-    exerciseGrid: {
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        paddingBottom: 28,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
-        rowGap: 12,
-    },
-    exerciseChoiceCard: {
-        width: "48.5%",
-        backgroundColor: COLORS.surface,
-        borderRadius: RADIUS.lg,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        overflow: "hidden",
-        minWidth: 0,
-    },
-    exerciseChoiceCardSelected: {
-        borderColor: COLORS.primaryLight,
-        borderWidth: 2,
-    },
-    exerciseChoiceImage: {
-        width: "100%",
-        aspectRatio: 1.45,
-        alignItems: "flex-end",
-        padding: 8,
-    },
-    exerciseChoiceImageInner: {
-        borderTopLeftRadius: RADIUS.lg,
-        borderTopRightRadius: RADIUS.lg,
-    },
-    selectedExerciseBadge: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: COLORS.primary,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    exerciseChoiceTitle: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: "800",
-        lineHeight: 19,
-        padding: 10,
-    },
-    modalEmptyText: {
-        width: "100%",
-        color: COLORS.mutedText,
-        textAlign: "center",
-        fontSize: 15,
-        lineHeight: 22,
-        paddingVertical: SPACING.xl,
     },
     blockCard: {
         backgroundColor: COLORS.surfaceLight,
