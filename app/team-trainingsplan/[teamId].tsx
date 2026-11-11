@@ -1,6 +1,11 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+    ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
+    Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
@@ -18,6 +23,8 @@ type PlanDraft = {
 };
 
 const emptyPhase = () => ({ goal: "", weeks: "1", exerciseIds: [] });
+const exerciseCount = (count: number) => count === 1 ? "1 oefening" : `${count} oefeningen`;
+const weekCount = (count: string) => count === "1" ? "1 week" : `${count || "0"} weken`;
 const planLabel = (months: number) => months === 3 ? "Kwartaal" : "Half jaar";
 
 function Button({ children, onPress, disabled, selected }: {
@@ -44,12 +51,14 @@ export default function TeamTrainingPlansScreen() {
     const [exercises, setExercises] = useState<Exercise[]>([]);
     const [draft, setDraft] = useState<PlanDraft | null>(null);
     const [pickerPhase, setPickerPhase] = useState<number | null>(null);
-    const [query, setQuery] = useState("");
+    const [expandedPhase, setExpandedPhase] = useState<number | null>(0);
+    const [expandedPlan, setExpandedPlan] = useState<number | null>(null);
     const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [error, setError] = useState("");
+    const scroll = useRef<ScrollView>(null);
 
     useEffect(() => {
         let active = true;
@@ -61,6 +70,8 @@ export default function TeamTrainingPlansScreen() {
         setLoading(true);
         setLoadError("");
         setDraft(null);
+        setPickerPhase(null);
+        setExpandedPlan(null);
         setConfirmDelete(null);
 
         async function load() {
@@ -102,6 +113,7 @@ export default function TeamTrainingPlansScreen() {
     const usedWeeks = draft?.phases.reduce((total, phase) => total + (Number(phase.weeks) || 0), 0) ?? 0;
 
     function openDraft(plan?: TeamTrainingPlan) {
+        scroll.current?.scrollTo({ y: 0, animated: false });
         const now = new Date();
         const today = [String(now.getDate()).padStart(2, "0"), String(now.getMonth() + 1).padStart(2, "0"), now.getFullYear()].join("-");
         setDraft(plan ? {
@@ -111,6 +123,7 @@ export default function TeamTrainingPlansScreen() {
             phases: plan.phases.map(phase => ({ ...phase, weeks: String(phase.weeks) })),
         } : { start: today, months: 3, phases: [emptyPhase()] });
         setPickerPhase(null);
+        setExpandedPhase(0);
         setConfirmDelete(null);
         setError("");
     }
@@ -128,9 +141,14 @@ export default function TeamTrainingPlansScreen() {
             setError("Vul een geldige startdatum in (dd-mm-jjjj).");
             return;
         }
-        if (draft.phases.some(phase => !phase.goal.trim() || !/^[1-9][0-9]*$/.test(phase.weeks))
-            || usedWeeks > maxWeeks) {
-            setError(`Vul per trainingsdoel een doel en een positief aantal weken in. Er passen maximaal ${maxWeeks} weken in dit plan.`);
+        const incompletePhase = draft.phases.findIndex(phase => !phase.goal.trim() || !/^[1-9][0-9]*$/.test(phase.weeks));
+        if (incompletePhase !== -1) {
+            setExpandedPhase(incompletePhase);
+            setError(`Vul bij trainingsdoel ${incompletePhase + 1} een doel en een positief aantal weken in.`);
+            return;
+        }
+        if (usedWeeks > maxWeeks) {
+            setError(`Er passen maximaal ${maxWeeks} weken in dit plan.`);
             return;
         }
 
@@ -150,6 +168,7 @@ export default function TeamTrainingPlansScreen() {
             const saved = result.data as TeamTrainingPlan;
             setPlans(current => [...current.filter(plan => plan.id !== saved.id), saved]
                 .sort((a, b) => b.starts_on.localeCompare(a.starts_on) || a.id - b.id));
+            setExpandedPlan(saved.id);
             setDraft(null);
         } catch {
             setError("Opslaan mislukt. Probeer het opnieuw.");
@@ -180,121 +199,253 @@ export default function TeamTrainingPlansScreen() {
         return <Text style={[styles.text, styles.container]}>{loadError || "Dit team is niet beschikbaar."}</Text>;
     }
 
+    const pickedPhase = pickerPhase === null ? undefined : draft?.phases[pickerPhase];
+
     return (
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>{teamName}</Text>
-            {canManage && !draft && <Button onPress={() => openDraft()} disabled={saving}>Nieuw trainingsplan</Button>}
-            {draft && canManage && (
-                <View style={styles.card}>
-                    <Text style={styles.heading}>{draft.id ? "Trainingsplan bewerken" : "Nieuw trainingsplan"}</Text>
-                    <View style={styles.row}>
-                        {([3, 6] as const).map(months => (
-                            <Button key={months} selected={draft.months === months} disabled={saving}
-                                onPress={() => setDraft({ ...draft, months })}>{planLabel(months)}</Button>
-                        ))}
-                    </View>
-                    <Text style={styles.text}>Startdatum (dd-mm-jjjj)</Text>
-                    <TextInput accessibilityLabel="Startdatum (dd-mm-jjjj)" style={styles.input}
-                        value={draft.start} maxLength={10} editable={!saving}
-                        onChangeText={value => setDraft({ ...draft, start: value })} />
-                    {end && <Text style={styles.muted}>Tot en met {planDateLabel(planDateAfterDays(end, -1))} · {usedWeeks} / {maxWeeks} weken ingepland</Text>}
-                    {draft.phases.map((phase, index) => (
-                        <View key={index} style={styles.phase}>
-                            <Text style={styles.heading}>Trainingsdoel {index + 1}</Text>
-                            <TextInput accessibilityLabel={`Trainingsdoel ${index + 1}`} style={styles.input}
-                                placeholder="Bijvoorbeeld aannemen onder druk" placeholderTextColor={COLORS.mutedText}
-                                value={phase.goal} maxLength={300} editable={!saving}
-                                onChangeText={goal => changePhase(index, { goal })} />
-                            <Text style={styles.text}>Aantal weken herhalen</Text>
-                            <TextInput accessibilityLabel={`Aantal weken voor trainingsdoel ${index + 1}`}
-                                style={styles.input} value={phase.weeks} keyboardType="number-pad" maxLength={2}
-                                editable={!saving} onChangeText={weeks => changePhase(index, { weeks })} />
-                            {phase.exerciseIds.map(id => (
-                                <Button key={id} disabled={saving} onPress={() => changePhase(index, {
-                                    exerciseIds: phase.exerciseIds.filter(item => item !== id),
-                                })}>{exerciseTitles.get(id) ?? "Oefening niet beschikbaar"} · Verwijder</Button>
+        <View style={styles.screen}>
+            <ScrollView ref={scroll} style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+                <Text style={styles.title}>{teamName}</Text>
+                {canManage && !draft && <Button onPress={() => openDraft()} disabled={saving}>Nieuw trainingsplan</Button>}
+                {draft && canManage && (
+                    <View style={styles.card}>
+                        <Text style={styles.heading}>{draft.id ? "Trainingsplan bewerken" : "Nieuw trainingsplan"}</Text>
+                        <View style={styles.row}>
+                            {([3, 6] as const).map(months => (
+                                <Button key={months} selected={draft.months === months} disabled={saving}
+                                    onPress={() => setDraft({ ...draft, months })}>{planLabel(months)}</Button>
                             ))}
-                            <Button disabled={saving} onPress={() => {
-                                setQuery("");
-                                setPickerPhase(pickerPhase === index ? null : index);
-                            }}>{pickerPhase === index ? "Zoeken sluiten" : "Oefeningen kiezen"}</Button>
-                            {pickerPhase === index && (
-                                <>
-                                    <TextInput accessibilityLabel="Zoek een oefening" style={styles.input}
-                                        placeholder="Zoek een oefening" placeholderTextColor={COLORS.mutedText}
-                                        value={query} editable={!saving} onChangeText={setQuery} />
-                                    {exercises.filter(item => !phase.exerciseIds.includes(item.id)
-                                        && item.title.toLowerCase().includes(query.trim().toLowerCase()))
-                                        .slice(0, 12).map(item => (
-                                            <Button key={item.id} disabled={saving || phase.exerciseIds.length >= 50}
-                                                onPress={() => changePhase(index, {
-                                                    exerciseIds: [...phase.exerciseIds, item.id],
-                                                })}>+ {item.title}</Button>
-                                        ))}
-                                </>
-                            )}
-                            {draft.phases.length > 1 && (
-                                <Button disabled={saving} onPress={() => {
-                                    setPickerPhase(null);
-                                    setDraft({ ...draft, phases: draft.phases.filter((_, position) => position !== index) });
-                                }}>Trainingsdoel verwijderen</Button>
+                        </View>
+                        <View style={styles.dateRow}>
+                            <View style={styles.dateField}>
+                                <Text style={styles.muted}>Startdatum</Text>
+                                <TextInput accessibilityLabel="Startdatum (dd-mm-jjjj)" style={styles.input}
+                                    value={draft.start} maxLength={10} editable={!saving}
+                                    placeholder="dd-mm-jjjj" placeholderTextColor={COLORS.mutedText}
+                                    onChangeText={value => setDraft({ ...draft, start: value })} />
+                            </View>
+                            {end && (
+                                <View style={styles.dateField}>
+                                    <Text style={styles.muted}>Tot en met</Text>
+                                    <Text style={styles.endDate}>{planDateLabel(planDateAfterDays(end, -1))}</Text>
+                                </View>
                             )}
                         </View>
-                    ))}
-                    <Button disabled={saving || draft.phases.length >= 27}
-                        onPress={() => setDraft({ ...draft, phases: [...draft.phases, emptyPhase()] })}>Trainingsdoel toevoegen</Button>
-                    <View style={styles.row}>
-                        <Button selected disabled={saving} onPress={save}>{saving ? "Opslaan…" : "Opslaan"}</Button>
-                        <Button disabled={saving} onPress={() => { setDraft(null); setError(""); }}>Annuleren</Button>
+                        {end && <Text style={styles.muted}>{usedWeeks} van {maxWeeks} weken ingepland</Text>}
                     </View>
-                    {!!error && <Text accessibilityLiveRegion="polite" style={styles.text}>{error}</Text>}
-                </View>
-            )}
-            {!draft && !!error && <Text accessibilityLiveRegion="polite" style={styles.text}>{error}</Text>}
-            {!draft && plans.length === 0 && <Text style={styles.muted}>Voor dit team is er nog geen trainingsplan.</Text>}
-            {!draft && plans.map(plan => {
-                let firstWeek = 1;
-                return (
-                    <View key={plan.id} style={styles.card}>
-                        <Text style={styles.heading}>{planLabel(plan.months)}</Text>
-                        <Text style={styles.muted}>{planDateLabel(plan.starts_on)} t/m {planDateLabel(planDateAfterDays(plan.ends_before, -1))}</Text>
-                        {plan.phases.map((phase, index) => {
-                            const week = firstWeek;
-                            firstWeek += phase.weeks;
+                )}
+                {draft && canManage && (
+                    <View style={styles.card}>
+                        <Text style={styles.heading}>Trainingsdoelen</Text>
+                        {draft.phases.map((phase, index) => {
+                            const expanded = expandedPhase === index;
                             return (
                                 <View key={index} style={styles.phase}>
-                                    <Text style={styles.muted}>{phase.weeks === 1 ? `Week ${week}` : `Week ${week} t/m ${firstWeek - 1}`}</Text>
-                                    <Text style={styles.heading}>{phase.goal}</Text>
-                                    {phase.exerciseIds.map(id => <Text key={id} style={styles.text}>{exerciseTitles.get(id) ?? "Oefening niet beschikbaar"}</Text>)}
+                                    <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
+                                        style={styles.summaryRow}
+                                        onPress={() => setExpandedPhase(expanded ? null : index)}>
+                                        <View style={styles.summaryText}>
+                                            <Text style={styles.itemTitle} numberOfLines={expanded ? 2 : 1}>
+                                                {phase.goal.trim() || `Trainingsdoel ${index + 1}`}
+                                            </Text>
+                                            <Text style={styles.muted}>{weekCount(phase.weeks)} · {exerciseCount(phase.exerciseIds.length)}</Text>
+                                        </View>
+                                        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={COLORS.mutedText} />
+                                    </Pressable>
+                                    {expanded && (
+                                        <View style={styles.phaseFields}>
+                                            <TextInput accessibilityLabel={`Trainingsdoel ${index + 1}`} style={styles.input}
+                                                placeholder="Bijvoorbeeld aannemen onder druk" placeholderTextColor={COLORS.mutedText}
+                                                value={phase.goal} maxLength={300} editable={!saving}
+                                                onChangeText={goal => changePhase(index, { goal })} />
+                                            <View style={styles.summaryRow}>
+                                                <Text style={[styles.text, styles.summaryText]}>Weken herhalen</Text>
+                                                <TextInput accessibilityLabel={`Aantal weken voor trainingsdoel ${index + 1}`}
+                                                    style={[styles.input, styles.weekInput]} value={phase.weeks}
+                                                    keyboardType="number-pad" maxLength={2} editable={!saving}
+                                                    onChangeText={weeks => changePhase(index, { weeks })} />
+                                            </View>
+                                            <Pressable accessibilityRole="button" disabled={saving} style={styles.summaryRow}
+                                                onPress={() => { Keyboard.dismiss(); setPickerPhase(index); }}>
+                                                <View style={styles.summaryText}>
+                                                    <Text style={styles.linkText}>{phase.exerciseIds.length ? "Oefeningen aanpassen" : "Oefeningen kiezen"}</Text>
+                                                    {phase.exerciseIds.length > 0 && (
+                                                        <Text style={styles.muted} numberOfLines={1}>
+                                                            {phase.exerciseIds.map(id => exerciseTitles.get(id) ?? "Oefening niet beschikbaar").join(", ")}
+                                                        </Text>
+                                                    )}
+                                                </View>
+                                                <Ionicons name="chevron-forward" size={18} color={COLORS.accent} />
+                                            </Pressable>
+                                            {draft.phases.length > 1 && (
+                                                <Pressable accessibilityRole="button" disabled={saving} style={styles.summaryRow}
+                                                    onPress={() => {
+                                                        setDraft({ ...draft, phases: draft.phases.filter((_, position) => position !== index) });
+                                                        setExpandedPhase(null);
+                                                    }}>
+                                                    <Text style={styles.muted}>Trainingsdoel verwijderen</Text>
+                                                </Pressable>
+                                            )}
+                                        </View>
+                                    )}
                                 </View>
                             );
                         })}
-                        {canManage && (
-                            <View style={styles.row}>
-                                {confirmDelete === plan.id ? (
-                                    <>
-                                        <Button disabled={saving} onPress={() => remove(plan.id)}>Plan definitief verwijderen</Button>
-                                        <Button disabled={saving} onPress={() => setConfirmDelete(null)}>Annuleren</Button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Button disabled={saving} onPress={() => openDraft(plan)}>Bewerken</Button>
-                                        <Button disabled={saving} onPress={() => { setError(""); setConfirmDelete(plan.id); }}>Verwijderen</Button>
-                                    </>
-                                )}
-                            </View>
-                        )}
+                        <Button disabled={saving || draft.phases.length >= 27} onPress={() => {
+                            setExpandedPhase(draft.phases.length);
+                            setDraft({ ...draft, phases: [...draft.phases, emptyPhase()] });
+                        }}>+ Trainingsdoel toevoegen</Button>
                     </View>
-                );
-            })}
-        </ScrollView>
+                )}
+                {!draft && !!error && <Text accessibilityLiveRegion="polite" style={styles.text}>{error}</Text>}
+                {!draft && plans.length === 0 && <Text style={styles.muted}>Voor dit team is er nog geen trainingsplan.</Text>}
+                {!draft && plans.map(plan => {
+                    let firstWeek = 1;
+                    const expanded = expandedPlan === plan.id;
+                    return (
+                        <View key={plan.id} style={styles.card}>
+                            <Pressable accessibilityRole="button" accessibilityState={{ expanded }} style={styles.summaryRow}
+                                onPress={() => {
+                                    setExpandedPlan(expanded ? null : plan.id);
+                                    setConfirmDelete(null);
+                                }}>
+                                <View style={styles.summaryText}>
+                                    <Text style={styles.heading}>{planLabel(plan.months)}</Text>
+                                    <Text style={styles.muted}>{planDateLabel(plan.starts_on)} t/m {planDateLabel(planDateAfterDays(plan.ends_before, -1))}</Text>
+                                    <Text style={styles.muted}>{plan.phases.length} {plan.phases.length === 1 ? "trainingsdoel" : "trainingsdoelen"}</Text>
+                                </View>
+                                <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={COLORS.mutedText} />
+                            </Pressable>
+                            {expanded && plan.phases.map((phase, index) => {
+                                const week = firstWeek;
+                                firstWeek += phase.weeks;
+                                return (
+                                    <View key={index} style={styles.phase}>
+                                        <Text style={styles.muted}>{phase.weeks === 1 ? `Week ${week}` : `Week ${week} t/m ${firstWeek - 1}`}</Text>
+                                        <Text style={styles.heading}>{phase.goal}</Text>
+                                        {phase.exerciseIds.map(id => <Text key={id} style={styles.text}>{exerciseTitles.get(id) ?? "Oefening niet beschikbaar"}</Text>)}
+                                    </View>
+                                );
+                            })}
+                            {expanded && canManage && (
+                                <View style={styles.row}>
+                                    {confirmDelete === plan.id ? (
+                                        <>
+                                            <Button disabled={saving} onPress={() => remove(plan.id)}>Plan definitief verwijderen</Button>
+                                            <Button disabled={saving} onPress={() => setConfirmDelete(null)}>Annuleren</Button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Button disabled={saving} onPress={() => openDraft(plan)}>Bewerken</Button>
+                                            <Button disabled={saving} onPress={() => { setError(""); setConfirmDelete(plan.id); }}>Verwijderen</Button>
+                                        </>
+                                    )}
+                                </View>
+                            )}
+                        </View>
+                    );
+                })}
+            </ScrollView>
+            {draft && canManage && (
+                <View style={styles.footer}>
+                    <View style={styles.footerContent}>
+                        {!!error && <Text accessibilityLiveRegion="polite" style={styles.text}>{error}</Text>}
+                        <View style={styles.footerActions}>
+                            <Button disabled={saving} onPress={() => { setDraft(null); setError(""); }}>Annuleren</Button>
+                            <Button selected disabled={saving} onPress={save}>{saving ? "Opslaan…" : "Plan opslaan"}</Button>
+                        </View>
+                    </View>
+                </View>
+            )}
+            {pickerPhase !== null && pickedPhase && (
+                <ExercisePicker exercises={exercises} selectedIds={pickedPhase.exerciseIds}
+                    onChange={exerciseIds => changePhase(pickerPhase, { exerciseIds })}
+                    onClose={() => setPickerPhase(null)} />
+            )}
+        </View>
+    );
+}
+
+function ExercisePicker({ exercises, selectedIds, onChange, onClose }: {
+    exercises: Exercise[];
+    selectedIds: number[];
+    onChange: (ids: number[]) => void;
+    onClose: () => void;
+}) {
+    const [query, setQuery] = useState("");
+    const [onlySelected, setOnlySelected] = useState(false);
+    const selected = new Set(selectedIds);
+    const results = onlySelected
+        ? selectedIds.map(id => exercises.find(item => item.id === id) ?? { id, title: "Oefening niet beschikbaar" })
+        : exercises.filter(item => item.title.toLowerCase().includes(query.trim().toLowerCase()));
+
+    return (
+        <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+            <SafeAreaView style={styles.backdrop}>
+                <KeyboardAvoidingView style={styles.pickerPanel} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+                    <View style={styles.pickerHeader}>
+                        <View style={styles.summaryRow}>
+                            <Text style={[styles.heading, styles.summaryText]} accessibilityRole="header">Oefeningen kiezen</Text>
+                            <Button selected onPress={onClose}>Gereed</Button>
+                        </View>
+                        <View style={styles.row}>
+                            <Button selected={!onlySelected} onPress={() => setOnlySelected(false)}>Alle oefeningen</Button>
+                            <Button selected={onlySelected} onPress={() => setOnlySelected(true)}>Gekozen ({selected.size})</Button>
+                        </View>
+                        {!onlySelected && (
+                            <TextInput accessibilityLabel="Zoek een oefening" style={styles.input}
+                                placeholder="Zoek een oefening" placeholderTextColor={COLORS.mutedText}
+                                value={query} onChangeText={setQuery} returnKeyType="search" />
+                        )}
+                        {selected.size >= 50 && <Text style={styles.muted}>Maximaal 50 oefeningen per trainingsdoel.</Text>}
+                    </View>
+                    <FlatList style={styles.screen} data={results} keyExtractor={item => String(item.id)}
+                        keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+                        ListEmptyComponent={<Text style={[styles.muted, styles.emptyResult]}>
+                            {onlySelected ? "Je hebt nog geen oefeningen gekozen." : "Geen oefeningen gevonden."}
+                        </Text>}
+                        renderItem={({ item }) => {
+                            const checked = selected.has(item.id);
+                            const disabled = !checked && selected.size >= 50;
+                            return (
+                                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked, disabled }}
+                                    disabled={disabled} style={[styles.exerciseRow, disabled && styles.disabled]}
+                                    onPress={() => onChange(checked
+                                        ? selectedIds.filter(id => id !== item.id)
+                                        : [...selectedIds, item.id])}>
+                                    <Ionicons name={checked ? "checkbox" : "square-outline"} size={22}
+                                        color={checked ? COLORS.accent : COLORS.mutedText} />
+                                    <Text style={[styles.text, styles.summaryText]}>{item.title}</Text>
+                                </Pressable>
+                            );
+                        }} />
+                </KeyboardAvoidingView>
+            </SafeAreaView>
+        </Modal>
     );
 }
 
 const styles = StyleSheet.create({
     container: { width: "100%", maxWidth: 820, alignSelf: "center", padding: SPACING.md, paddingBottom: SPACING.xxl, gap: SPACING.md },
     card: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: RADIUS.lg, padding: SPACING.md, gap: SPACING.sm },
-    phase: { borderTopColor: COLORS.border, borderTopWidth: 1, paddingTop: SPACING.md, marginTop: SPACING.sm, gap: SPACING.sm },
+    screen: { flex: 1 },
+    phase: { borderTopColor: COLORS.border, borderTopWidth: 1, paddingTop: SPACING.xs, gap: SPACING.xs },
+    phaseFields: { gap: SPACING.xs, paddingBottom: SPACING.xs },
+    summaryRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, minHeight: 44 },
+    summaryText: { flex: 1, minWidth: 0 },
+    itemTitle: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
+    linkText: { color: COLORS.accent, fontSize: 15, fontWeight: "700" },
+    dateRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
+    dateField: { flex: 1, minWidth: 125, gap: SPACING.xs },
+    endDate: { color: COLORS.text, fontSize: 15, paddingVertical: SPACING.sm },
+    weekInput: { width: 64, textAlign: "center" },
+    footer: { borderTopColor: COLORS.border, borderTopWidth: 1, backgroundColor: COLORS.surface },
+    footerContent: { width: "100%", maxWidth: 820, alignSelf: "center", paddingVertical: SPACING.sm, paddingHorizontal: SPACING.md, gap: SPACING.xs },
+    footerActions: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: SPACING.sm },
+    backdrop: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: SPACING.sm },
+    pickerPanel: { width: "100%", maxWidth: 580, height: "90%", maxHeight: 680, overflow: "hidden", backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, borderColor: COLORS.border, borderWidth: 1 },
+    pickerHeader: { padding: SPACING.md, borderBottomColor: COLORS.border, borderBottomWidth: 1, gap: SPACING.sm },
+    exerciseRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: SPACING.sm, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, borderBottomColor: COLORS.border, borderBottomWidth: 1 },
+    emptyResult: { padding: SPACING.md },
     title: { color: COLORS.text, fontSize: 24, fontWeight: "900" },
     heading: { color: COLORS.text, fontSize: 17, fontWeight: "800" },
     text: { color: COLORS.text, fontSize: 15 },
