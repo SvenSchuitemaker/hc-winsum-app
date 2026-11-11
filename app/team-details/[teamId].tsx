@@ -417,6 +417,16 @@ export default function TeamDetailsScreen() {
                     )}
                 </View>
 
+                {team && (
+                    <Pressable
+                        accessibilityRole="button"
+                        style={[styles.button, { marginBottom: SPACING.lg }]}
+                        onPress={() => router.push({ pathname: "/team-trainingsplan/[teamId]", params: { teamId: String(team.id) } })}
+                    >
+                        <Text style={styles.buttonText}>Trainingsplannen</Text>
+                    </Pressable>
+                )}
+
                 <View style={styles.card}>
                     <Text style={styles.sectionTitle}>Komende trainingen</Text>
 

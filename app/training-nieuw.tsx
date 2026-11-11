@@ -21,6 +21,7 @@ import {
 import { COLORS, RADIUS, SPACING } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
+import { planPhaseOn, type TeamTrainingPlan } from "../lib/teamTrainingPlans";
 import { takeCreatedTrainerExercise } from "../lib/trainerExerciseSelection";
 import { getTrainerExercisePreviewUrl } from "../lib/trainerExercisePreview";
 
@@ -211,6 +212,56 @@ export default function TrainingNieuwScreen() {
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState("");
     const [templateLoading, setTemplateLoading] = useState(false);
+    const [planResult, setPlanResult] = useState<{
+        teamId: string;
+        date: string;
+        plans: TeamTrainingPlan[];
+        exercises: ExerciseOption[];
+        failed: boolean;
+    } | null>(null);
+
+    const selectedDate = formatDateForDatabase(trainingDate);
+    const currentPlanResult = planResult?.teamId === selectedTeamId && planResult.date === selectedDate ? planResult : null;
+    const activePhases = (currentPlanResult?.plans ?? []).flatMap(plan => {
+        const phase = selectedDate && planPhaseOn(plan, selectedDate);
+        return phase ? [{ planId: plan.id, phase }] : [];
+    });
+
+    useFocusEffect(useCallback(() => {
+        if (!supabase || !user || !selectedTeamId || !selectedDate) return;
+        let active = true;
+        async function loadPlans() {
+            if (!supabase || !selectedDate) return;
+            const result = await supabase.from("team_training_plans")
+                .select("id, starts_on, ends_before, months, phases")
+                .eq("team_id", Number(selectedTeamId))
+                .lte("starts_on", selectedDate).gt("ends_before", selectedDate)
+                .order("starts_on", { ascending: false }).order("id");
+            if (!active) return;
+            const plans = (result.data ?? []) as TeamTrainingPlan[];
+            const exerciseIds = [...new Set(plans.flatMap(plan => planPhaseOn(plan, selectedDate)?.exerciseIds ?? []))];
+            const plannedExercises: ExerciseOption[] = [];
+            let failed = !!result.error;
+            for (let offset = 0; active && offset < exerciseIds.length; offset += 100) {
+                const page = await supabase.from("exercises").select("id, title, category_slug, image_url")
+                    .in("id", exerciseIds.slice(offset, offset + 100));
+                if (page.error) {
+                    failed = true;
+                    break;
+                }
+                plannedExercises.push(...page.data);
+            }
+            if (active) setPlanResult({
+                teamId: selectedTeamId,
+                date: selectedDate,
+                plans,
+                exercises: plannedExercises,
+                failed,
+            });
+        }
+        void loadPlans();
+        return () => { active = false; };
+    }, [user, selectedTeamId, selectedDate]));
 
     const exercises = useMemo(() => {
         return exerciseSource === "favorites" ? favoriteExercises : exerciseSource === "own" ? ownExercises : allExercises;
@@ -546,6 +597,17 @@ export default function TrainingNieuwScreen() {
         return [...allExercises, ...ownExercises].find((exercise) => String(exercise.id) === exerciseId) ?? null;
     }
 
+    function addPlannedExercise(exercise: ExerciseOption) {
+        setAllExercises(current => current.some(item => item.id === exercise.id) ? current : [...current, exercise]);
+        setBlocks(current => current.some(block => !block.isBreak && block.exerciseId === String(exercise.id)) ? current : [...current, {
+            localId: makeLocalId(),
+            title: exercise.title,
+            exerciseId: String(exercise.id),
+            duration: "10",
+            notes: "",
+        }]);
+    }
+
     function addBlock() {
         const fallbackExerciseId = exercises[0] ? String(exercises[0].id) : "";
         setBlocks((current) => [
@@ -789,6 +851,38 @@ export default function TrainingNieuwScreen() {
                 <Text style={{color:COLORS.mutedText,fontSize:13,marginBottom:16}}>
                     De hoofdtrainer beheert de vaste trainingstijden per team. Herinneringen volgen automatisch dat rooster.
                 </Text>
+
+                {!!selectedTeamId && (
+                    <View style={styles.teamPlan}>
+                        <Pressable accessibilityRole="link" onPress={() => router.push({
+                            pathname: "/team-trainingsplan/[teamId]",
+                            params: { teamId: selectedTeamId },
+                        })}>
+                            <Text style={styles.teamPlanLink}>Trainingsplannen van dit team bekijken</Text>
+                        </Pressable>
+                        {currentPlanResult?.failed && (
+                            <Text style={styles.teamPlanText}>Trainingsplan voor deze datum kon niet worden geladen.</Text>
+                        )}
+                        {activePhases.map(({ planId, phase }) => (
+                            <View key={planId} style={styles.teamPlan}>
+                                <Text style={styles.label}>{phase.goal}</Text>
+                                {phase.exerciseIds.map(id => {
+                                    const exercise = currentPlanResult?.exercises.find(item => item.id === id);
+                                    if (!exercise) return <Text key={id} style={styles.teamPlanText}>Oefening niet beschikbaar</Text>;
+                                    const alreadyAdded = blocks.some(block => !block.isBreak && block.exerciseId === String(id));
+                                    return (
+                                        <Pressable key={id} accessibilityRole="button" disabled={alreadyAdded}
+                                            onPress={() => addPlannedExercise(exercise)}>
+                                            <Text style={alreadyAdded ? styles.teamPlanText : styles.teamPlanLink}>
+                                                {alreadyAdded ? "In training · " : "+ "}{exercise.title}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                        ))}
+                    </View>
+                )}
 
                 <Text style={styles.label}>Bron oefeningen</Text>
                 <View style={styles.filterRow}>
@@ -1091,6 +1185,9 @@ export default function TrainingNieuwScreen() {
 }
 
 const styles = StyleSheet.create({
+    teamPlan: { gap: SPACING.sm, marginBottom: SPACING.md },
+    teamPlanLink: { color: COLORS.accent, fontWeight: "700", minHeight: 32 },
+    teamPlanText: { color: COLORS.mutedText },
     container: { flex: 1, backgroundColor: COLORS.background },
     content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
     center: {
