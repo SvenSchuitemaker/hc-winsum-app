@@ -67,6 +67,7 @@ export default function RootLayout() {
                         <Stack.Screen name="exercise-bewerk/[id]" options={withBack("Oefening bewerken")} />
                         <Stack.Screen name="dashboard" options={withBack("Dashboard")} />
                         <Stack.Screen name="notifications" options={withBack("Meldingen")} />
+                        <Stack.Screen name="team-trainingsplan/[teamId]" options={withBack("Trainingsplannen")} />
                         <Stack.Screen name="weekoverzicht" options={withBack("Weekoverzicht")} />
                         <Stack.Screen name="shared-training/[token]" options={withBack("Gedeelde training")} />
                     </Stack>
