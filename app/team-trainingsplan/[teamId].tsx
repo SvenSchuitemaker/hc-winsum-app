@@ -2,10 +2,10 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-    ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
+    ActivityIndicator, Keyboard,
     Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import ExercisePicker, { type ExerciseCategory, type ExerciseChoice } from "../../components/ExercisePicker";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
@@ -14,7 +14,8 @@ import {
     type TeamTrainingPlan, type TrainingPhase,
 } from "../../lib/teamTrainingPlans";
 
-type Exercise = { id: number; title: string };
+type Exercise = ExerciseChoice<number>;
+const exerciseLimit = 50;
 type PlanDraft = {
     id?: number;
     start: string;
@@ -49,6 +50,7 @@ export default function TeamTrainingPlansScreen() {
     const [teamName, setTeamName] = useState("");
     const [plans, setPlans] = useState<TeamTrainingPlan[]>([]);
     const [exercises, setExercises] = useState<Exercise[]>([]);
+    const [categories, setCategories] = useState<ExerciseCategory[]>([]);
     const [draft, setDraft] = useState<PlanDraft | null>(null);
     const [pickerPhase, setPickerPhase] = useState<number | null>(null);
     const [expandedPhase, setExpandedPhase] = useState<number | null>(0);
@@ -77,16 +79,19 @@ export default function TeamTrainingPlansScreen() {
         async function load() {
             if (!client) return;
             try {
-                const [team, result] = await Promise.all([
+                const [team, result, categoryResult] = await Promise.all([
                     client.from("teams").select("name").eq("id", Number(teamId)).single(),
                     client.from("team_training_plans").select("id, starts_on, ends_before, months, phases")
                         .eq("team_id", Number(teamId)).order("starts_on", { ascending: false }).order("id"),
+                    client.from("categories").select("slug, title").order("id", { ascending: true }),
                 ]);
-                if (team.error || result.error) throw team.error || result.error;
+                if (team.error || result.error || categoryResult.error) {
+                    throw team.error || result.error || categoryResult.error;
+                }
 
                 const catalog: Exercise[] = [];
                 for (let offset = 0; active; offset += 500) {
-                    const page = await client.from("exercises").select("id, title")
+                    const page = await client.from("exercises").select("id, title, category_slug, image_url")
                         .order("title").order("id").range(offset, offset + 499);
                     if (page.error) throw page.error;
                     catalog.push(...page.data);
@@ -96,6 +101,7 @@ export default function TeamTrainingPlansScreen() {
                 setTeamName(team.data.name);
                 setPlans(result.data as TeamTrainingPlan[]);
                 setExercises(catalog);
+                setCategories(categoryResult.data ?? []);
             } catch {
                 if (active) setLoadError("Trainingsplannen konden niet worden geladen.");
             } finally {
@@ -106,7 +112,7 @@ export default function TeamTrainingPlansScreen() {
         return () => { active = false; };
     }, [teamId, user]);
 
-    const exerciseTitles = new Map(exercises.map(exercise => [exercise.id, exercise.title]));
+    const exercisesById = new Map(exercises.map(exercise => [exercise.id, exercise]));
     const start = draft?.start.split("-").reverse().join("-") ?? "";
     const end = draft ? planEnd(start, draft.months) : null;
     const maxWeeks = end ? Math.ceil(planDayCount(start, end) / 7) : 0;
@@ -270,7 +276,7 @@ export default function TeamTrainingPlansScreen() {
                                                     <Text style={styles.linkText}>{phase.exerciseIds.length ? "Oefeningen aanpassen" : "Oefeningen kiezen"}</Text>
                                                     {phase.exerciseIds.length > 0 && (
                                                         <Text style={styles.muted} numberOfLines={1}>
-                                                            {phase.exerciseIds.map(id => exerciseTitles.get(id) ?? "Oefening niet beschikbaar").join(", ")}
+                                                            {phase.exerciseIds.map(id => exercisesById.get(id)?.title ?? "Oefening niet beschikbaar").join(", ")}
                                                         </Text>
                                                     )}
                                                 </View>
@@ -322,7 +328,7 @@ export default function TeamTrainingPlansScreen() {
                                     <View key={index} style={styles.phase}>
                                         <Text style={styles.muted}>{phase.weeks === 1 ? `Week ${week}` : `Week ${week} t/m ${firstWeek - 1}`}</Text>
                                         <Text style={styles.heading}>{phase.goal}</Text>
-                                        {phase.exerciseIds.map(id => <Text key={id} style={styles.text}>{exerciseTitles.get(id) ?? "Oefening niet beschikbaar"}</Text>)}
+                                        {phase.exerciseIds.map(id => <Text key={id} style={styles.text}>{exercisesById.get(id)?.title ?? "Oefening niet beschikbaar"}</Text>)}
                                     </View>
                                 );
                             })}
@@ -357,70 +363,25 @@ export default function TeamTrainingPlansScreen() {
                 </View>
             )}
             {pickerPhase !== null && pickedPhase && (
-                <ExercisePicker exercises={exercises} selectedIds={pickedPhase.exerciseIds}
-                    onChange={exerciseIds => changePhase(pickerPhase, { exerciseIds })}
+                <ExercisePicker subtitle={pickedPhase.goal.trim() || `Trainingsdoel ${pickerPhase + 1}`}
+                    exercises={exercises} categories={categories}
+                    multiple={{
+                        selected: pickedPhase.exerciseIds.map(id => exercisesById.get(id) ?? {
+                            id, title: "Oefening niet beschikbaar", category_slug: "", image_url: null,
+                        }),
+                        limit: exerciseLimit,
+                    }}
+                    onSelect={({ id }) => {
+                        const ids = pickedPhase.exerciseIds;
+                        if (ids.includes(id)) {
+                            changePhase(pickerPhase, { exerciseIds: ids.filter(item => item !== id) });
+                        } else if (ids.length < exerciseLimit) {
+                            changePhase(pickerPhase, { exerciseIds: [...ids, id] });
+                        }
+                    }}
                     onClose={() => setPickerPhase(null)} />
             )}
         </View>
-    );
-}
-
-function ExercisePicker({ exercises, selectedIds, onChange, onClose }: {
-    exercises: Exercise[];
-    selectedIds: number[];
-    onChange: (ids: number[]) => void;
-    onClose: () => void;
-}) {
-    const [query, setQuery] = useState("");
-    const [onlySelected, setOnlySelected] = useState(false);
-    const selected = new Set(selectedIds);
-    const results = onlySelected
-        ? selectedIds.map(id => exercises.find(item => item.id === id) ?? { id, title: "Oefening niet beschikbaar" })
-        : exercises.filter(item => item.title.toLowerCase().includes(query.trim().toLowerCase()));
-
-    return (
-        <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-            <SafeAreaView style={styles.backdrop}>
-                <KeyboardAvoidingView style={styles.pickerPanel} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-                    <View style={styles.pickerHeader}>
-                        <View style={styles.summaryRow}>
-                            <Text style={[styles.heading, styles.summaryText]} accessibilityRole="header">Oefeningen kiezen</Text>
-                            <Button selected onPress={onClose}>Gereed</Button>
-                        </View>
-                        <View style={styles.row}>
-                            <Button selected={!onlySelected} onPress={() => setOnlySelected(false)}>Alle oefeningen</Button>
-                            <Button selected={onlySelected} onPress={() => setOnlySelected(true)}>Gekozen ({selected.size})</Button>
-                        </View>
-                        {!onlySelected && (
-                            <TextInput accessibilityLabel="Zoek een oefening" style={styles.input}
-                                placeholder="Zoek een oefening" placeholderTextColor={COLORS.mutedText}
-                                value={query} onChangeText={setQuery} returnKeyType="search" />
-                        )}
-                        {selected.size >= 50 && <Text style={styles.muted}>Maximaal 50 oefeningen per trainingsdoel.</Text>}
-                    </View>
-                    <FlatList style={styles.screen} data={results} keyExtractor={item => String(item.id)}
-                        keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-                        ListEmptyComponent={<Text style={[styles.muted, styles.emptyResult]}>
-                            {onlySelected ? "Je hebt nog geen oefeningen gekozen." : "Geen oefeningen gevonden."}
-                        </Text>}
-                        renderItem={({ item }) => {
-                            const checked = selected.has(item.id);
-                            const disabled = !checked && selected.size >= 50;
-                            return (
-                                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked, disabled }}
-                                    disabled={disabled} style={[styles.exerciseRow, disabled && styles.disabled]}
-                                    onPress={() => onChange(checked
-                                        ? selectedIds.filter(id => id !== item.id)
-                                        : [...selectedIds, item.id])}>
-                                    <Ionicons name={checked ? "checkbox" : "square-outline"} size={22}
-                                        color={checked ? COLORS.accent : COLORS.mutedText} />
-                                    <Text style={[styles.text, styles.summaryText]}>{item.title}</Text>
-                                </Pressable>
-                            );
-                        }} />
-                </KeyboardAvoidingView>
-            </SafeAreaView>
-        </Modal>
     );
 }
 
@@ -441,11 +402,6 @@ const styles = StyleSheet.create({
     footer: { borderTopColor: COLORS.border, borderTopWidth: 1, backgroundColor: COLORS.surface },
     footerContent: { width: "100%", maxWidth: 820, alignSelf: "center", paddingVertical: SPACING.sm, paddingHorizontal: SPACING.md, gap: SPACING.xs },
     footerActions: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: SPACING.sm },
-    backdrop: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: SPACING.sm },
-    pickerPanel: { width: "100%", maxWidth: 580, height: "90%", maxHeight: 680, overflow: "hidden", backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, borderColor: COLORS.border, borderWidth: 1 },
-    pickerHeader: { padding: SPACING.md, borderBottomColor: COLORS.border, borderBottomWidth: 1, gap: SPACING.sm },
-    exerciseRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: SPACING.sm, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, borderBottomColor: COLORS.border, borderBottomWidth: 1 },
-    emptyResult: { padding: SPACING.md },
     title: { color: COLORS.text, fontSize: 24, fontWeight: "900" },
     heading: { color: COLORS.text, fontSize: 17, fontWeight: "800" },
     text: { color: COLORS.text, fontSize: 15 },
