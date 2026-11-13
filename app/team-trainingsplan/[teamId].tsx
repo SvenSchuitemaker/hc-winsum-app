@@ -60,6 +60,7 @@ export default function TeamTrainingPlansScreen() {
     const [saving, setSaving] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [error, setError] = useState("");
+    const [saveSummary, setSaveSummary] = useState("");
     const scroll = useRef<ScrollView>(null);
 
     useEffect(() => {
@@ -71,6 +72,7 @@ export default function TeamTrainingPlansScreen() {
         }
         setLoading(true);
         setLoadError("");
+        setSaveSummary("");
         setDraft(null);
         setPickerPhase(null);
         setExpandedPlan(null);
@@ -120,6 +122,7 @@ export default function TeamTrainingPlansScreen() {
 
     function openDraft(plan?: TeamTrainingPlan) {
         scroll.current?.scrollTo({ y: 0, animated: false });
+        setSaveSummary("");
         const now = new Date();
         const today = [String(now.getDate()).padStart(2, "0"), String(now.getMonth() + 1).padStart(2, "0"), now.getFullYear()].join("-");
         setDraft(plan ? {
@@ -153,25 +156,44 @@ export default function TeamTrainingPlansScreen() {
             setError(`Vul bij trainingsdoel ${incompletePhase + 1} een doel en een positief aantal weken in.`);
             return;
         }
-        if (usedWeeks > maxWeeks) {
-            setError(`Er passen maximaal ${maxWeeks} weken in dit plan.`);
+        if (usedWeeks !== maxWeeks) {
+            setError(`Verdeel alle ${maxWeeks} weken van het plan over de trainingsdoelen. Nu ingepland: ${usedWeeks}.`);
+            return;
+        }
+
+        const emptyExercisePhase = draft.phases.findIndex(phase => phase.exerciseIds.length === 0);
+        if (emptyExercisePhase !== -1) {
+            setExpandedPhase(emptyExercisePhase);
+            setError(`Kies minstens één oefening bij trainingsdoel ${emptyExercisePhase + 1}.`);
             return;
         }
 
         const phases: TrainingPhase[] = draft.phases.map(phase => ({
             goal: phase.goal.trim(), weeks: Number(phase.weeks), exerciseIds: phase.exerciseIds,
         }));
-        const values = { starts_on: start, months: draft.months, phases };
         setSaving(true);
         setError("");
         try {
-            const table = supabase.from("team_training_plans");
-            const request = draft.id
-                ? table.update(values).eq("team_id", Number(teamId)).eq("id", draft.id)
-                : table.insert({ ...values, team_id: Number(teamId) });
-            const result = await request.select("id, starts_on, ends_before, months, phases").single();
-            if (result.error) throw result.error;
-            const saved = result.data as TeamTrainingPlan;
+            const result = await supabase.rpc("save_team_training_plan", {
+                p_team_id: Number(teamId),
+                p_plan_id: draft.id ?? null,
+                p_starts_on: start,
+                p_months: draft.months,
+                p_phases: phases,
+            });
+            if (result.error) {
+                setError(result.error.code === "P0001" || result.error.code === "42501"
+                    ? result.error.message
+                    : "Het plan en de trainingen konden niet worden opgeslagen. Probeer het opnieuw.");
+                return;
+            }
+            const { plan: saved, created, skipped } = result.data as {
+                plan: TeamTrainingPlan; created: number; skipped: number;
+            };
+            setSaveSummary(`${created} ${created === 1 ? "training aangemaakt" : "trainingen aangemaakt"}.${skipped
+                ? ` ${skipped} ${skipped === 1 ? "roostermoment overgeslagen" : "roostermomenten overgeslagen"} vanwege bestaande trainingen.`
+                : ""}`);
+            scroll.current?.scrollTo({ y: 0, animated: false });
             setPlans(current => [...current.filter(plan => plan.id !== saved.id), saved]
                 .sort((a, b) => b.starts_on.localeCompare(a.starts_on) || a.id - b.id));
             setExpandedPlan(saved.id);
@@ -211,6 +233,9 @@ export default function TeamTrainingPlansScreen() {
         <View style={styles.screen}>
             <ScrollView ref={scroll} style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
                 <Text style={styles.title}>{teamName}</Text>
+                {!draft && !!saveSummary && (
+                    <Text accessibilityLiveRegion="polite" style={styles.text}>{saveSummary}</Text>
+                )}
                 {canManage && !draft && <Button onPress={() => openDraft()} disabled={saving}>Nieuw trainingsplan</Button>}
                 {draft && canManage && (
                     <View style={styles.card}>
@@ -237,6 +262,7 @@ export default function TeamTrainingPlansScreen() {
                             )}
                         </View>
                         {end && <Text style={styles.muted}>{usedWeeks} van {maxWeeks} weken ingepland</Text>}
+                        <Text style={styles.muted}>Op elk vrij moment uit het vaste teamrooster wordt een training aangemaakt. De gekozen oefeningen komen elke week van het trainingsdoel terug.</Text>
                     </View>
                 )}
                 {draft && canManage && (
@@ -357,7 +383,7 @@ export default function TeamTrainingPlansScreen() {
                         {!!error && <Text accessibilityLiveRegion="polite" style={styles.text}>{error}</Text>}
                         <View style={styles.footerActions}>
                             <Button disabled={saving} onPress={() => { setDraft(null); setError(""); }}>Annuleren</Button>
-                            <Button selected disabled={saving} onPress={save}>{saving ? "Opslaan…" : "Plan opslaan"}</Button>
+                            <Button selected disabled={saving} onPress={save}>{saving ? "Opslaan…" : "Opslaan en inplannen"}</Button>
                         </View>
                     </View>
                 </View>
