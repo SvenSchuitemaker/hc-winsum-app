@@ -1,3 +1,4 @@
+import { webBasePath } from "./webBasePath";
 import { supabase } from "./supabase";
 
 /** Alarm rows are private to their authenticated user via RLS. */
@@ -19,6 +20,6 @@ export async function cancelLiveTimerPush(alarmId:string):Promise<void>{
 export async function hasLiveTimerPushSubscription():Promise<boolean>{
     if(typeof navigator==="undefined"||!("serviceWorker" in navigator)||
        typeof Notification==="undefined"||Notification.permission!=="granted")return false;
-    const registration=await navigator.serviceWorker.getRegistration("/hc-winsum-app/");
+    const registration=await navigator.serviceWorker.getRegistration(webBasePath);
     return !!(await registration?.pushManager.getSubscription());
 }

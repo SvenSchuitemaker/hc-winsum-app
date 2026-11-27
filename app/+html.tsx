@@ -1,3 +1,4 @@
+import { webBasePath } from "../lib/webBasePath";
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
@@ -15,8 +16,8 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="H.C. Winsum" />
-        <link rel="manifest" href="/hc-winsum-app/manifest.json" />
-        <link rel="apple-touch-icon" href="/hc-winsum-app/apple-touch-icon.png" />
+        <link rel="manifest" href={webBasePath + "manifest.json"} />
+        <link rel="apple-touch-icon" href={webBasePath + "apple-touch-icon.png"} />
         <ScrollViewStyleReset />
         <style>{`
           html,

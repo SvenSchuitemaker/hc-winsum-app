@@ -281,7 +281,10 @@ export default function TrainingDetailScreen() {
     async function handleShare() {
         if (!training) return;
 
-        const publicUrl = `https://svenschuitemaker.github.io/hc-winsum-app/shared-training/${training.share_token}`;
+        const publicBase = process.env.EXPO_PUBLIC_WEB_ROOT === "1" && typeof window !== "undefined"
+            ? window.location.origin
+            : "https://svenschuitemaker.github.io/hc-winsum-app";
+        const publicUrl = `${publicBase}/shared-training/${training.share_token}`;
         const shareText = [
             `Training: ${training.title}`,
             training.teams?.name ? `Team: ${training.teams.name}` : null,
