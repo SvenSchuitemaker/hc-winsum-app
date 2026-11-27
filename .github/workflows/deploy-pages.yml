@@ -15,12 +15,14 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  EXPO_PUBLIC_SUPABASE_URL: https://shllbltitjogepjeyxdr.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_KyVUt2icqBTdyfcNaYDJcw_nBdTPAL5
+
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      EXPO_PUBLIC_SUPABASE_URL: https://shllbltitjogepjeyxdr.supabase.co
-      EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_KyVUt2icqBTdyfcNaYDJcw_nBdTPAL5
       PAGES_ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
@@ -66,3 +68,22 @@ jobs:
         uses: actions/deploy-pages@v4
         with:
           artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
+
+  build-home-server:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_WEB_ROOT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run export:web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hc-winsum-home-server
+          path: dist/
+          if-no-files-found: error

@@ -1,3 +1,4 @@
+import { webBasePath } from "./webBasePath";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
 
@@ -17,8 +18,7 @@ export async function enableTrainingPushNotifications(userId:string):Promise<str
     if(!supabase)throw new Error("Geen verbinding met Supabase.");
     const {data,error}=await supabase.functions.invoke("dispatch-push",{method:"GET"});
     if(error||!data?.publicKey)throw new Error("Pushnotificaties konden niet worden geactiveerd.");
-    const base="/hc-winsum-app/";
-    const worker=await navigator.serviceWorker.register(base+"push-sw.js",{scope:base});
+    await navigator.serviceWorker.register(webBasePath+"push-sw.js",{scope:webBasePath});
     const ready=await navigator.serviceWorker.ready;
     const subscription=await ready.pushManager.subscribe({
         userVisibleOnly:true,
