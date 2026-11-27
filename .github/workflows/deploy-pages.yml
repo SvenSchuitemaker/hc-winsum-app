@@ -82,6 +82,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run export:web
+      - name: Link the web app manifest
+        run: |
+          sed -i 's|</head>|<link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>|' dist/index.html
       - uses: actions/upload-artifact@v4
         with:
           name: hc-winsum-home-server
